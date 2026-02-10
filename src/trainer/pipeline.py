@@ -1,5 +1,10 @@
 """
 RWKV Training Pipeline - Unified interface for training
+
+Supports:
+- Custom data inputs (numpy, JSONL)
+- Custom tokenizers and vocabularies
+- Flexible model configurations
 """
 
 import os
@@ -17,7 +22,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from data_utils.converter import DataPipeline
-from data_utils.tokenizer import AngleTokenizer
+from data_utils.tokenizer import BaseTokenizer, IntegerTokenizer, GenericTokenizer
 
 
 @dataclass
@@ -27,11 +32,8 @@ class ModelConfig:
     n_layer: int = 3
     n_embd: int = 128
     ctx_len: int = 1024
-    vocab_size: int = 361  # 0-359 angles + end_of_doc
+    vocab_size: int = 361  # Will be updated based on tokenizer
     head_size_a: int = 64
-    
-    def __post_init__(self):
-        assert self.vocab_size >= 361, "vocab_size must be at least 361 for angle data"
 
 
 @dataclass
@@ -60,18 +62,28 @@ class DataConfig:
 
 class RWKVTrainingPipeline:
     """
-    Complete training pipeline for RWKV on Vicsek angle data
+    Complete training pipeline for RWKV on custom sequence data
     
-    Usage:
+    Usage Examples:
+        # 1. From numpy array (integer sequences)
         pipeline = RWKVTrainingPipeline(
-            work_dir="./experiment_1",
+            work_dir="./experiment",
             model_config=ModelConfig(n_layer=3, n_embd=128),
-            training_config=TrainingConfig(lr_init=6e-4)
+            training_config=TrainingConfig(lr_init=6e-4),
+            tokenizer=IntegerTokenizer(max_value=999)  # Custom vocab size
         )
-        
-        # From numpy data
-        data = np.load("angles.npy")  # shape: (n_seq, seq_len)
+        data = np.random.randint(0, 1000, size=(1000, 1024))
         pipeline.train(data, num_epochs=100)
+        
+        # 2. From existing JSONL file
+        pipeline.prepare_data_from_jsonl("data.jsonl")
+        pipeline.train(num_epochs=100)
+        
+        # 3. With custom tokenizer
+        pipeline = RWKVTrainingPipeline(
+            work_dir="./experiment",
+            tokenizer=GenericTokenizer("custom_vocab.txt")
+        )
     """
     
     def __init__(self,
@@ -79,6 +91,7 @@ class RWKVTrainingPipeline:
                  model_config: Optional[ModelConfig] = None,
                  training_config: Optional[TrainingConfig] = None,
                  data_config: Optional[DataConfig] = None,
+                 tokenizer: Optional[BaseTokenizer] = None,
                  wandb_project: Optional[str] = None):
         """
         Initialize training pipeline
@@ -88,6 +101,7 @@ class RWKVTrainingPipeline:
             model_config: model architecture configuration
             training_config: training hyperparameters
             data_config: data processing configuration
+            tokenizer: custom tokenizer (default: IntegerTokenizer(max_value=359))
             wandb_project: wandb project name (None to disable)
         """
         self.work_dir = Path(work_dir).resolve()
@@ -95,6 +109,12 @@ class RWKVTrainingPipeline:
         self.training_config = training_config or TrainingConfig()
         self.data_config = data_config or DataConfig()
         self.wandb_project = wandb_project
+        
+        # Initialize tokenizer
+        self.tokenizer = tokenizer or IntegerTokenizer(max_value=359)
+        
+        # Update vocab_size in model_config based on tokenizer
+        self.model_config.vocab_size = self.tokenizer.vocab_size
         
         # Create directories
         self.data_dir = self.work_dir / "data"
@@ -104,8 +124,7 @@ class RWKVTrainingPipeline:
         for d in [self.data_dir, self.output_dir, self.config_dir]:
             d.mkdir(parents=True, exist_ok=True)
         
-        # Initialize tokenizer and data pipeline
-        self.tokenizer = AngleTokenizer()
+        # Initialize data pipeline
         self.data_pipeline = DataPipeline(self.tokenizer)
         
         # State
@@ -113,6 +132,7 @@ class RWKVTrainingPipeline:
         self.model_initialized = False
         self.magic_prime = None
         self.my_exit_tokens = None
+        self.data_prefix = None
         
         # Save config
         self._save_config()
@@ -124,6 +144,7 @@ class RWKVTrainingPipeline:
             'training': asdict(self.training_config),
             'data': asdict(self.data_config),
             'wandb_project': self.wandb_project,
+            'vocab_size': self.tokenizer.vocab_size,
         }
         with open(self.config_dir / "config.json", 'w') as f:
             json.dump(config, f, indent=2)
@@ -132,10 +153,10 @@ class RWKVTrainingPipeline:
                      data: np.ndarray,
                      data_name: str = "train") -> Dict[str, Any]:
         """
-        Prepare data for training (numpy -> jsonl -> bin/idx)
+        Prepare numpy data for training (numpy -> jsonl -> bin/idx)
         
         Args:
-            data: numpy array of angle sequences (shape: (n_seq, seq_len) or (total_len,))
+            data: numpy array of integer sequences (shape: (n_seq, seq_len) or (total_len,))
             data_name: name for this dataset
             
         Returns:
@@ -143,9 +164,15 @@ class RWKVTrainingPipeline:
         """
         print(f"### Preparing data: {data_name}")
         print(f"    Input shape: {data.shape}")
+        print(f"    Value range: [{data.min()}, {data.max()}]")
+        print(f"    Vocab size: {self.tokenizer.vocab_size}")
+        
+        # Validate data range
+        if data.min() < 0 or data.max() >= self.tokenizer.vocab_size - 1:
+            print(f"    WARNING: Data values [{data.min()}, {data.max()}] may exceed tokenizer range")
         
         # Process data
-        result = self.data_pipeline.process(
+        result = self.data_pipeline.process_numpy(
             data=data,
             output_dir=self.data_dir,
             name=data_name,
@@ -158,14 +185,11 @@ class RWKVTrainingPipeline:
         self.my_exit_tokens = result['total_tokens']
         self.data_prepared = True
         
-        # Save vocab
-        vocab_path = self.data_dir / "vocab.txt"
-        self.tokenizer.save_vocab(vocab_path)
-        
         print(f"### Data preparation complete:")
         print(f"    Total tokens: {self.my_exit_tokens}")
         print(f"    Magic prime: {self.magic_prime}")
         print(f"    Data prefix: {self.data_prefix}")
+        print(f"    Vocab file: {result['vocab_path']}")
         
         return result
     
@@ -185,9 +209,46 @@ class RWKVTrainingPipeline:
         data = np.load(file_path)
         return self.prepare_data(data, data_name)
     
+    def prepare_data_from_jsonl(self,
+                                jsonl_path: Union[str, Path],
+                                data_name: str = "train",
+                                n_epochs: int = None) -> Dict[str, Any]:
+        """
+        Prepare existing JSONL file for training
+        
+        Args:
+            jsonl_path: path to existing JSONL file
+            data_name: name for this dataset
+            n_epochs: number of epochs for data duplication (default: from data_config)
+            
+        Returns:
+            Dictionary with data information
+        """
+        print(f"### Preparing data from JSONL: {jsonl_path}")
+        
+        n_epochs = n_epochs or self.data_config.n_epochs_duplication
+        
+        result = self.data_pipeline.process_jsonl(
+            jsonl_path=jsonl_path,
+            output_dir=self.data_dir,
+            name=data_name,
+            n_epochs=n_epochs
+        )
+        
+        self.data_prefix = result['binidx_prefix']
+        self.magic_prime = result['magic_prime']
+        self.my_exit_tokens = result['total_tokens']
+        self.data_prepared = True
+        
+        print(f"### Data preparation complete:")
+        print(f"    Total tokens: {self.my_exit_tokens}")
+        print(f"    Magic prime: {self.magic_prime}")
+        print(f"    Data prefix: {self.data_prefix}")
+        
+        return result
+    
     def _get_train_script_path(self) -> Path:
         """Get path to train.py script"""
-        # The train script should be in the package
         package_dir = Path(__file__).parent.parent.parent
         return package_dir / "train.py"
     
@@ -213,6 +274,7 @@ class RWKVTrainingPipeline:
         
         print(f"### Initializing model (Stage 1)...")
         print(f"    Output: {self.output_dir}")
+        print(f"    Vocab size: {self.model_config.vocab_size}")
         
         # Build command
         cmd = self._build_train_command(stage=1)
@@ -233,7 +295,7 @@ class RWKVTrainingPipeline:
         Run complete training pipeline
         
         Args:
-            data: numpy array of angle sequences (if None, use prepared data)
+            data: numpy array of sequences (if None, use prepared data)
             num_epochs: number of training epochs
             continue_training: if True, continue from latest checkpoint
         """

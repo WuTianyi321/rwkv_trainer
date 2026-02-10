@@ -1,5 +1,10 @@
 """
 Data conversion utilities: numpy -> jsonl -> bin/idx
+
+Supports:
+- Custom tokenizers
+- Generic numpy arrays
+- Pre-built JSONL files
 """
 
 import json
@@ -7,22 +12,31 @@ import os
 import random
 import struct
 from pathlib import Path
-from typing import List, Union, Optional
+from typing import List, Union, Optional, Callable
 import numpy as np
 
-from .tokenizer import AngleTokenizer
+from .tokenizer import BaseTokenizer, IntegerTokenizer
 from .binidx import MMapIndexedDatasetBuilder
 
 
 class NumpyToJsonlConverter:
     """
-    Convert numpy angle sequences to JSONL format
+    Convert numpy arrays to JSONL format
     
-    Each sequence becomes one line: {"text": "angle1 angle2 angle3 ..."}
+    Supports:
+    - Integer arrays (0-max_value) -> space-separated string
+    - Custom transform function
     """
     
-    def __init__(self, tokenizer: Optional[AngleTokenizer] = None):
-        self.tokenizer = tokenizer or AngleTokenizer()
+    def __init__(self, transform: Optional[Callable] = None):
+        """
+        Initialize converter
+        
+        Args:
+            transform: Optional function to transform array elements to strings
+                      If None, uses str() for each element
+        """
+        self.transform = transform or (lambda x: str(int(x)))
     
     def convert(self, 
                 data: np.ndarray, 
@@ -32,7 +46,7 @@ class NumpyToJsonlConverter:
         Convert numpy array to JSONL
         
         Args:
-            data: numpy array of shape (n_sequences, seq_len) or (seq_len,)
+            data: numpy array of shape (n_sequences, seq_len) or (total_len,)
             output_path: output JSONL file path
             sequence_length: if data is 1D, split into sequences of this length
             
@@ -60,9 +74,9 @@ class NumpyToJsonlConverter:
         # Write to JSONL
         with open(output_path, 'w', encoding='utf-8') as f:
             for seq in sequences:
-                # Convert angle values to space-separated string
-                angle_str = ' '.join(str(int(a)) for a in seq)
-                json_line = json.dumps({"text": angle_str})
+                # Convert values to space-separated string
+                value_str = ' '.join(self.transform(x) for x in seq)
+                json_line = json.dumps({"text": value_str})
                 f.write(json_line + '\n')
         
         return output_path
@@ -90,10 +104,18 @@ class JsonlToBinIdxConverter:
     """
     Convert JSONL to binary indexed format (.bin + .idx)
     Used for efficient memory-mapped training data loading
+    
+    Supports custom tokenizers for different data types
     """
     
-    def __init__(self, tokenizer: Optional[AngleTokenizer] = None):
-        self.tokenizer = tokenizer or AngleTokenizer()
+    def __init__(self, tokenizer: Optional[BaseTokenizer] = None):
+        """
+        Initialize converter
+        
+        Args:
+            tokenizer: Tokenizer to use. If None, uses IntegerTokenizer
+        """
+        self.tokenizer = tokenizer or IntegerTokenizer(max_value=359)
     
     def convert(self,
                 jsonl_path: Union[str, Path],
@@ -140,9 +162,8 @@ class JsonlToBinIdxConverter:
                 data = json.loads(line)
                 text = data["text"]
                 
-                # Parse angle string and tokenize
-                angles = [int(x) for x in text.split()]
-                tokens = self.tokenizer.encode_angle_sequence(angles)
+                # Tokenize using the configured tokenizer
+                tokens = self.tokenizer.encode(text)
                 tokens.append(0)  # end_of_doc token
                 
                 builder.add_item(np.array(tokens, dtype=np.uint16))
@@ -231,24 +252,29 @@ class JsonlToBinIdxConverter:
 class DataPipeline:
     """
     Complete data processing pipeline: numpy -> jsonl -> bin/idx
+    
+    Flexible pipeline supporting:
+    - Custom tokenizers
+    - Different data types
+    - Pre-built JSONL files
     """
     
-    def __init__(self, tokenizer: Optional[AngleTokenizer] = None):
-        self.tokenizer = tokenizer or AngleTokenizer()
-        self.numpy_converter = NumpyToJsonlConverter(self.tokenizer)
+    def __init__(self, tokenizer: Optional[BaseTokenizer] = None):
+        self.tokenizer = tokenizer or IntegerTokenizer(max_value=359)
+        self.numpy_converter = NumpyToJsonlConverter()
         self.jsonl_converter = JsonlToBinIdxConverter(self.tokenizer)
     
-    def process(self,
-                data: np.ndarray,
-                output_dir: Union[str, Path],
-                name: str = "data",
-                sequence_length: int = 1024,
-                n_epochs: int = 3) -> dict:
+    def process_numpy(self,
+                     data: np.ndarray,
+                     output_dir: Union[str, Path],
+                     name: str = "data",
+                     sequence_length: int = 1024,
+                     n_epochs: int = 3) -> dict:
         """
         Process numpy data through full pipeline
         
         Args:
-            data: numpy array of angle sequences
+            data: numpy array of integer sequences
             output_dir: output directory
             name: base name for output files
             sequence_length: sequence length for splitting
@@ -272,9 +298,60 @@ class DataPipeline:
         info = self.jsonl_converter.get_data_info(binidx_prefix)
         magic_prime = self.jsonl_converter.compute_magic_prime(binidx_prefix, sequence_length)
         
+        # Save vocab
+        vocab_path = output_dir / "vocab.txt"
+        self.tokenizer.save_vocab(vocab_path)
+        
         return {
             'jsonl_path': jsonl_path,
             'binidx_prefix': binidx_prefix,
+            'vocab_path': vocab_path,
+            'num_sequences': info['num_items'],
+            'total_tokens': info['total_tokens'],
+            'magic_prime': magic_prime,
+        }
+    
+    def process_jsonl(self,
+                     jsonl_path: Union[str, Path],
+                     output_dir: Union[str, Path],
+                     name: str = "data",
+                     n_epochs: int = 3) -> dict:
+        """
+        Process existing JSONL file through bin/idx conversion
+        
+        Args:
+            jsonl_path: path to existing JSONL file
+            output_dir: output directory
+            name: base name for output files
+            n_epochs: number of epochs for data duplication
+            
+        Returns:
+            Dictionary with paths and information
+        """
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Copy JSONL to output dir
+        import shutil
+        jsonl_dest = output_dir / f"{name}.jsonl"
+        shutil.copy(jsonl_path, jsonl_dest)
+        
+        # Convert to bin/idx
+        binidx_prefix = output_dir / name
+        self.jsonl_converter.convert(jsonl_dest, binidx_prefix, n_epochs)
+        
+        # Get info (use ctx_len=1024 as default)
+        info = self.jsonl_converter.get_data_info(binidx_prefix)
+        magic_prime = self.jsonl_converter.compute_magic_prime(binidx_prefix, 1024)
+        
+        # Save vocab
+        vocab_path = output_dir / "vocab.txt"
+        self.tokenizer.save_vocab(vocab_path)
+        
+        return {
+            'jsonl_path': jsonl_dest,
+            'binidx_prefix': binidx_prefix,
+            'vocab_path': vocab_path,
             'num_sequences': info['num_items'],
             'total_tokens': info['total_tokens'],
             'magic_prime': magic_prime,
