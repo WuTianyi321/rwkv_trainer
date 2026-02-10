@@ -7,6 +7,7 @@ A packaged, general-purpose RWKV training framework for sequence data.
 - **Universal Data Support**: Works with any integer sequence data (not just angles)
 - **Flexible Tokenization**: Custom vocabularies, custom tokenizers
 - **Multiple Input Formats**: Numpy arrays, JSONL files
+- **External Checkpoint Resume**: Auto-detect architecture from any RWKV-LM checkpoint
 - **One-line interface**: Simple Python API for complete training pipeline
 - **Self-contained**: All dependencies packaged, no external RWKV-LM repository needed
 - **Work directory based**: All outputs organized in a single working directory
@@ -81,6 +82,23 @@ tokenizer = GenericTokenizer("custom_vocab.txt")
 pipeline = RWKVTrainingPipeline(
     work_dir="./experiment",
     tokenizer=tokenizer
+)
+```
+
+### Example 4: Resume from External Checkpoint
+
+```python
+from rwkv_trainer import RWKVTrainingPipeline
+
+pipeline = RWKVTrainingPipeline(work_dir="./experiment")
+
+# Prepare your data
+pipeline.prepare_data_from_jsonl("your_data.jsonl")
+
+# Resume from any RWKV-LM checkpoint (auto-detect architecture)
+pipeline.train_from_checkpoint(
+    checkpoint_path="/path/to/pretrained_model.pth",
+    num_epochs=50  # Fine-tune for 50 more epochs
 )
 ```
 
@@ -286,6 +304,93 @@ tokens = tokenizer.encode_angle_sequence([0, 45, 90])  # [1, 46, 91]
 | `micro_bsz` | 16 | Batch size per GPU |
 | `grad_cp` | 1 | Gradient checkpointing |
 | `precision` | "bf16" | "bf16", "fp16", or "fp32" |
+
+---
+
+## Advanced Usage
+
+### Resume from External Checkpoint
+
+You can resume training from any RWKV-LM checkpoint (any path, any filename). The pipeline will **auto-detect** model architecture from the checkpoint.
+
+#### Example 1: Auto-detect Everything
+
+```python
+from rwkv_trainer import RWKVTrainingPipeline
+
+pipeline = RWKVTrainingPipeline(work_dir="./my_experiment")
+
+# Prepare your data
+pipeline.prepare_data_from_jsonl("your_data.jsonl")
+
+# Resume from external checkpoint (auto-detect n_layer, n_embd, vocab_size, model_type)
+pipeline.train_from_checkpoint(
+    checkpoint_path="/path/to/any/rwkv-model.pth",
+    num_epochs=100
+)
+```
+
+**Auto-detected parameters:**
+- `n_layer`: Count transformer blocks
+- `n_embd`: From embedding weight shape
+- `vocab_size`: From embedding or head weight shape
+- `model_type`: Infer from key patterns (x052/x060/x070)
+
+#### Example 2: Override Specific Parameters
+
+```python
+# Auto-detect but override ctx_len (cannot be detected from weights)
+pipeline.train_from_checkpoint(
+    checkpoint_path="/path/to/model.pth",
+    num_epochs=100,
+    override_config={
+        'ctx_len': 2048,      # Override context length
+        'lr_init': 1e-4,      # Override learning rate
+    }
+)
+```
+
+#### Example 3: Inspect Checkpoint Before Training
+
+```python
+# Check what the pipeline will detect
+info = pipeline.inspect_checkpoint("/path/to/model.pth")
+
+print(f"File size: {info['file_size_mb']:.1f} MB")
+print(f"Parameters: {info['num_parameters']:,}")
+print(f"Detected config: {info['detected_config']}")
+# Output: {'n_layer': 12, 'n_embd': 768, 'vocab_size': 65536, 'model_type': 'x060'}
+```
+
+#### Important Notes
+
+1. **Vocab size must match**: Your data/tokenizer vocab size must match the checkpoint's vocab size
+2. **Checkpoint copied**: External checkpoint is copied to `work_dir/out/rwkv-init.pth`
+3. **Auto-save config**: Detected/overridden config is saved to `work_dir/configs/config.json`
+
+### Continue from Pipeline's Own Checkpoint
+
+```python
+# Continue training from work_dir's latest checkpoint
+pipeline = RWKVTrainingPipeline(work_dir="./existing_experiment")
+pipeline.train(num_epochs=200, continue_training=True)
+```
+
+### Step-by-Step Pipeline
+
+```python
+# Initialize
+pipeline = RWKVTrainingPipeline(work_dir="./experiment")
+
+# Step 1: Prepare data
+pipeline.prepare_data(data, "train")
+
+# Step 2: Initialize model (Stage 1)
+pipeline.initialize_model()
+
+# Step 3: Train (Stage 3)
+pipeline.train(num_epochs=100)
+```
 
 ---
 
