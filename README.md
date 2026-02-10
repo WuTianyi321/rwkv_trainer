@@ -12,8 +12,42 @@ A packaged RWKV training framework for collective motion (Vicsek model) angle se
 
 ## Installation
 
+This project uses [uv](https://github.com/astral-sh/uv) for fast Python package management.
+
+### Install uv
+
 ```bash
-pip install -r requirements.txt
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Or with pip:
+```bash
+pip install uv
+```
+
+### Setup Project
+
+```bash
+# Clone the repository
+git clone https://github.com/WuTianyi321/rwkv_trainer.git
+cd rwkv_trainer
+
+# Create virtual environment and install dependencies
+uv venv
+uv pip install -e ".[dev]"
+
+# Or using the lock file for reproducible installs
+uv pip sync uv.lock
+```
+
+### Using with uv run
+
+```bash
+# Run training without activating environment
+uv run python examples/simple_training.py
+
+# Run tests
+uv run python -m pytest tests/ -v
 ```
 
 ## Quick Start
@@ -46,7 +80,7 @@ rwkv_trainer/
 │   │   ├── converter.py     # numpy → jsonl → bin/idx
 │   │   └── binidx.py        # Memory-mapped dataset
 │   ├── model/               # RWKV model implementation
-│   │   └── rwkv_model.py    # RWKV architecture
+│   │   └── model.py         # RWKV architecture
 │   ├── trainer/             # Training logic
 │   │   ├── pipeline.py      # Main training pipeline
 │   │   ├── trainer_module.py # Training callbacks
@@ -55,6 +89,8 @@ rwkv_trainer/
 ├── tests/                   # Unit tests
 ├── examples/                # Example scripts
 ├── train.py                 # Entry point script
+├── pyproject.toml           # Project configuration (uv/pip)
+├── uv.lock                  # Locked dependency versions
 └── README.md
 
 # After training, your work_dir will contain:
@@ -111,19 +147,56 @@ data = np.array([
 
 ## Testing
 
-Run tests:
+Run tests with uv:
 
 ```bash
 # Run all tests
-pytest tests/ -v
+uv run ./run_tests.sh
+
+# Or using pytest directly
+uv run python -m pytest tests/ -v
 
 # Run specific test file
-pytest tests/test_tokenizer.py -v
-pytest tests/test_data_converter.py -v
-pytest tests/test_pipeline.py -v
+uv run python tests/test_tokenizer_simple.py
+uv run python tests/test_data_converter_simple.py
+uv run python tests/test_pipeline_simple.py
+```
 
-# Run integration tests
-pytest tests/test_integration.py -v
+Or activate the environment first:
+
+```bash
+source .venv/bin/activate
+./run_tests.sh
+```
+
+## Development
+
+### Code Formatting
+
+```bash
+# Format code with black
+uv run black src/ tests/
+
+# Lint with ruff
+uv run ruff check src/ tests/
+```
+
+### Adding Dependencies
+
+```bash
+# Add runtime dependency
+uv pip install <package>
+# Then update pyproject.toml
+
+# Add dev dependency
+uv pip install <package> --dev
+```
+
+### Update Lock File
+
+```bash
+# After modifying pyproject.toml
+uv pip compile pyproject.toml -o uv.lock
 ```
 
 ## Advanced Usage
@@ -163,3 +236,7 @@ pipeline.train(num_epochs=100)
 ## License
 
 Same as RWKV-LM
+
+## Acknowledgments
+
+This project is based on [RWKV-LM](https://github.com/BlinkDL/RWKV-LM) by BlinkDL.
