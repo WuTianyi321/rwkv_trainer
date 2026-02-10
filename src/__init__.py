@@ -5,11 +5,18 @@ Supports:
 - Custom sequence data (numpy, JSONL)
 - Custom tokenizers and vocabularies
 - Flexible model configurations
+- Resume from external RWKV-LM checkpoints
 """
 
 __version__ = "0.1.0"
 
 from .trainer.pipeline import RWKVTrainingPipeline, ModelConfig, TrainingConfig, DataConfig
+from .trainer.model_utils import (
+    inspect_rwkv_checkpoint,
+    load_checkpoint_for_training,
+    validate_checkpoint_compatibility,
+    DetectedModelConfig
+)
 from .data_utils.converter import NumpyToJsonlConverter, JsonlToBinIdxConverter, DataPipeline
 from .data_utils.tokenizer import (
     BaseTokenizer,
@@ -25,6 +32,10 @@ __all__ = [
     'ModelConfig',
     'TrainingConfig',
     'DataConfig',
+    'inspect_rwkv_checkpoint',
+    'load_checkpoint_for_training',
+    'validate_checkpoint_compatibility',
+    'DetectedModelConfig',
     'NumpyToJsonlConverter', 
     'JsonlToBinIdxConverter',
     'DataPipeline',

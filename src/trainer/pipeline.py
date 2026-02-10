@@ -5,6 +5,7 @@ Supports:
 - Custom data inputs (numpy, JSONL)
 - Custom tokenizers and vocabularies
 - Flexible model configurations
+- Resume from external RWKV-LM checkpoints
 """
 
 import os
@@ -79,10 +80,11 @@ class RWKVTrainingPipeline:
         pipeline.prepare_data_from_jsonl("data.jsonl")
         pipeline.train(num_epochs=100)
         
-        # 3. With custom tokenizer
-        pipeline = RWKVTrainingPipeline(
-            work_dir="./experiment",
-            tokenizer=GenericTokenizer("custom_vocab.txt")
+        # 3. Resume from external checkpoint
+        pipeline.train_from_checkpoint(
+            checkpoint_path="/path/to/rwkv-10.pth",
+            num_epochs=100,
+            auto_detect=True  # Auto-detect model architecture
         )
     """
     
@@ -297,7 +299,7 @@ class RWKVTrainingPipeline:
         Args:
             data: numpy array of sequences (if None, use prepared data)
             num_epochs: number of training epochs
-            continue_training: if True, continue from latest checkpoint
+            continue_training: if True, continue from latest checkpoint in work_dir
         """
         # Step 1: Prepare data if provided
         if data is not None:
@@ -320,6 +322,139 @@ class RWKVTrainingPipeline:
         self._run_command(cmd, description="Training")
         
         print(f"### Training complete!")
+    
+    def train_from_checkpoint(self,
+                              checkpoint_path: Union[str, Path],
+                              num_epochs: int = 100,
+                              auto_detect: bool = True,
+                              override_config: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Train from an external RWKV-LM checkpoint
+        
+        This method allows you to:
+        1. Load a checkpoint from anywhere (auto-detect architecture)
+        2. Override specific parameters if needed
+        3. Continue training with your data
+        
+        Args:
+            checkpoint_path: Path to external .pth file (RWKV-LM format)
+            num_epochs: Number of epochs to train
+            auto_detect: If True, automatically detect model architecture from checkpoint
+            override_config: Dict of parameters to override (e.g., {'ctx_len': 2048})
+            
+        Raises:
+            RuntimeError: If data not prepared or checkpoint incompatible
+            
+        Example:
+            # Auto-detect everything
+            pipeline.train_from_checkpoint("/path/to/rwkv-10.pth", num_epochs=100)
+            
+            # Override ctx_len
+            pipeline.train_from_checkpoint(
+                "/path/to/rwkv-10.pth",
+                num_epochs=100,
+                override_config={'ctx_len': 2048}
+            )
+        """
+        if not self.data_prepared:
+            raise RuntimeError("Data must be prepared before training")
+        
+        checkpoint_path = Path(checkpoint_path)
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+        
+        print(f"### Loading external checkpoint: {checkpoint_path}")
+        
+        # Import here to avoid circular imports
+        from .model_utils import (
+            inspect_rwkv_checkpoint,
+            load_checkpoint_for_training,
+            validate_checkpoint_compatibility
+        )
+        
+        # Inspect checkpoint
+        info = inspect_rwkv_checkpoint(str(checkpoint_path))
+        print(f"### Checkpoint info:")
+        print(f"    File size: {info['file_size_mb']:.1f} MB")
+        print(f"    Parameters: {info['num_parameters']:,}")
+        
+        if auto_detect and 'detected_config' in info:
+            detected = info['detected_config']
+            print(f"### Auto-detected architecture:")
+            print(f"    n_layer: {detected['n_layer']}")
+            print(f"    n_embd: {detected['n_embd']}")
+            print(f"    vocab_size: {detected['vocab_size']}")
+            print(f"    model_type: {detected['model_type']}")
+            
+            # Update model config with detected values
+            original_config = asdict(self.model_config)
+            
+            self.model_config.n_layer = detected['n_layer']
+            self.model_config.n_embd = detected['n_embd']
+            self.model_config.vocab_size = detected['vocab_size']
+            self.model_config.model_type = detected['model_type']
+            
+            # Apply user overrides
+            if override_config:
+                print(f"### Applying user overrides:")
+                for key, value in override_config.items():
+                    if hasattr(self.model_config, key):
+                        print(f"    {key}: {getattr(self.model_config, key)} -> {value}")
+                        setattr(self.model_config, key, value)
+                    else:
+                        print(f"    Warning: Unknown config key '{key}'")
+            
+            # Validate compatibility
+            if self.model_config.vocab_size != self.tokenizer.vocab_size:
+                print(f"### ERROR: Vocab size mismatch!")
+                print(f"    Checkpoint: {self.model_config.vocab_size}")
+                print(f"    Your data/tokenizer: {self.tokenizer.vocab_size}")
+                print(f"### You need to:")
+                print(f"    1. Create a tokenizer with matching vocab_size, or")
+                print(f"    2. Train with data that matches the checkpoint's vocab")
+                raise RuntimeError("Vocab size mismatch")
+            
+            # Save updated config
+            self._save_config()
+            print(f"### Model config updated and saved")
+        
+        # Copy checkpoint to output directory for training
+        target_path = self.output_dir / "rwkv-init.pth"
+        print(f"### Copying checkpoint to: {target_path}")
+        shutil.copy(checkpoint_path, target_path)
+        
+        # Set flag to indicate model is initialized
+        self.model_initialized = True
+        
+        # Build training command with explicit checkpoint path
+        print(f"### Starting training from checkpoint...")
+        cmd = self._build_train_command(
+            stage=3, 
+            num_epochs=num_epochs,
+            continue_training=False  # We manually copied the checkpoint
+        )
+        
+        # Replace the load_model argument with our checkpoint path
+        for i, arg in enumerate(cmd):
+            if arg == "--load_model":
+                cmd[i+1] = str(target_path)
+                break
+        
+        self._run_command(cmd, description="Training from external checkpoint")
+        print(f"### Training complete!")
+    
+    def inspect_checkpoint(self, checkpoint_path: Union[str, Path]) -> Dict[str, Any]:
+        """
+        Inspect an external RWKV checkpoint without training
+        
+        Args:
+            checkpoint_path: Path to .pth file
+            
+        Returns:
+            Dictionary with checkpoint information
+        """
+        from .model_utils import inspect_rwkv_checkpoint
+        return inspect_rwkv_checkpoint(str(checkpoint_path))
     
     def _build_train_command(self, 
                             stage: int,
