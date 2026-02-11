@@ -1,3 +1,3 @@
-from .rwkv_model import RWKV
+from .model import RWKV
 
 __all__ = ['RWKV']

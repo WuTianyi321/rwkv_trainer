@@ -14,15 +14,32 @@ A packaged, general-purpose RWKV training framework for sequence data.
 
 ## Installation
 
-This project uses [uv](https://github.com/astral-sh/uv) for fast Python package management.
+### From PyPI (Recommended)
 
 ```bash
-# Install uv
-curl -LsSf https://astral.sh/uv/install.sh | sh
+# Basic installation
+pip install rwkv-trainer
 
-# Clone and setup
+# With CUDA support (includes PyTorch)
+pip install rwkv-trainer[cuda]
+```
+
+[![PyPI version](https://badge.fury.io/py/rwkv-trainer.svg)](https://pypi.org/project/rwkv-trainer/)
+
+### From Source (Development)
+
+If you want to modify the code or contribute:
+
+```bash
+# Clone repository
 git clone https://github.com/WuTianyi321/rwkv_trainer.git
 cd rwkv_trainer
+
+# Using pip
+pip install -e ".[dev]"
+
+# Or using uv (faster)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 uv venv
 uv pip install -e ".[dev]"
 ```
@@ -481,12 +498,17 @@ pipeline.train(num_epochs=100)
 
 ```bash
 # Run all tests
-uv run ./run_tests.sh
+./run_tests.sh
 
 # Or individually
-uv run python tests/test_tokenizer_simple.py
-uv run python tests/test_data_converter_simple.py
-uv run python tests/test_pipeline_simple.py
+python tests/test_tokenizer_simple.py
+python tests/test_data_converter_simple.py
+python tests/test_pipeline_simple.py
+```
+
+If using `uv`:
+```bash
+uv run ./run_tests.sh
 ```
 
 ---

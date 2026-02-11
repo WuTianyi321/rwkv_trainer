@@ -4,6 +4,9 @@
 
 import os, math, gc, importlib
 import torch
+
+# Get absolute path to cuda directory
+CUDA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'cuda')
 # torch._C._jit_set_profiling_executor(True)
 # torch._C._jit_set_profiling_mode(True)
 import torch.nn as nn
@@ -45,7 +48,7 @@ if 'x070' in os.environ["RWKV_MY_TESTING"]:
     CHUNK_LEN = 16
 
     flags = ['-res-usage', f'-D_C_={HEAD_SIZE}', f"-D_CHUNK_LEN_={CHUNK_LEN}", "--use_fast_math", "-O3", "-Xptxas -O3", "--extra-device-vectorization"]
-    load(name="wind_backstepping", sources=[f'cuda/wkv7_cuda.cu', 'cuda/wkv7_op.cpp'], is_python_module=False, verbose=True, extra_cuda_cflags=flags)
+    load(name="wind_backstepping", sources=[f'{CUDA_DIR}/wkv7_cuda.cu', f'{CUDA_DIR}/wkv7_op.cpp'], is_python_module=False, verbose=True, extra_cuda_cflags=flags)
 
     class WindBackstepping(torch.autograd.Function):
         @staticmethod
@@ -76,7 +79,7 @@ if 'x070' in os.environ["RWKV_MY_TESTING"]:
 
 elif 'x060' in os.environ["RWKV_MY_TESTING"]:
     if os.environ["RWKV_TRAIN_TYPE"] == 'states':
-        wkv6state_cuda = load(name="wkv6state", sources=["cuda/wkv6state_op.cpp", f"cuda/wkv6state_cuda.cu"],
+        wkv6state_cuda = load(name="wkv6state", sources=[f"{CUDA_DIR}/wkv6state_op.cpp", f"{CUDA_DIR}/wkv6state_cuda.cu"],
                         verbose=True, extra_cuda_cflags=["-res-usage", "--use_fast_math", "-O3", "-Xptxas -O3", "--extra-device-vectorization", f"-D_N_={HEAD_SIZE}", f"-D_T_={int(os.environ['RWKV_CTXLEN'])}"])
             
         class WKV_6STATE(torch.autograd.Function):
@@ -129,7 +132,7 @@ elif 'x060' in os.environ["RWKV_MY_TESTING"]:
         def RUN_CUDA_RWKV6_STATE(B, T, C, H, r, k, v, w, u, s):
             return WKV_6STATE.apply(B, T, C, H, r, k, v, w, u, s)
     else:
-        load(name="wkv6", sources=["cuda/wkv6_op.cpp", f"cuda/wkv6_cuda.cu"], is_python_module=False,
+        load(name="wkv6", sources=[f"{CUDA_DIR}/wkv6_op.cpp", f"{CUDA_DIR}/wkv6_cuda.cu"], is_python_module=False,
                         verbose=True, extra_cuda_cflags=["-res-usage", "--use_fast_math", "-O3", "-Xptxas -O3", "--extra-device-vectorization", f"-D_N_={HEAD_SIZE}", f"-D_T_={int(os.environ['RWKV_CTXLEN'])}"])
             
         class WKV_6(torch.autograd.Function):
@@ -181,7 +184,7 @@ elif 'x060' in os.environ["RWKV_MY_TESTING"]:
             return WKV_6.apply(r, k, v, w, u)
 
 elif 'x052' in os.environ["RWKV_MY_TESTING"]:
-    wkv5_cuda = load(name="wkv5", sources=["cuda/wkv5_op.cpp", f"cuda/wkv5_cuda.cu"],
+    wkv5_cuda = load(name="wkv5", sources=[f"{CUDA_DIR}/wkv5_op.cpp", f"{CUDA_DIR}/wkv5_cuda.cu"],
                     verbose=True, extra_cuda_cflags=["-res-usage", "--use_fast_math", "-O3", "-Xptxas -O3", "--extra-device-vectorization", f"-D_N_={HEAD_SIZE}"])
         
     class WKV_5(torch.autograd.Function):

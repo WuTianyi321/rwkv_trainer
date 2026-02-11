@@ -263,15 +263,32 @@ class AngleTokenizer(BaseTokenizer):
         return b''.join(self.idx2token[i] for i in tokens if i in self.idx2token)
     
     def encode(self, src: str) -> List[int]:
-        """Encode string to token IDs"""
-        return self.encodeBytes(src.encode("utf-8"))
+        """
+        Encode string to token IDs
+        
+        For angle data, expects space-separated integers like "102 348 270"
+        Falls back to parent class encodeBytes for other formats
+        """
+        # Try to parse as space-separated angles
+        try:
+            angles = [int(x.strip()) for x in src.split()]
+            return self.encode_angle_sequence(angles)
+        except ValueError:
+            # Fall back to default encoding
+            return self.encodeBytes(src.encode("utf-8"))
     
     def decode(self, tokens: List[int]) -> str:
         """Decode token IDs to string"""
         try:
-            return self.decodeBytes(tokens).decode('utf-8')
-        except UnicodeDecodeError:
-            return '\ufffd'  # replacement character for bad utf-8
+            # Try to decode as angle sequence
+            angles = self.decode_angle_sequence(tokens)
+            return ' '.join(str(a) for a in angles)
+        except (ValueError, IndexError):
+            # Fall back to bytes decoding
+            try:
+                return self.decodeBytes(tokens).decode('utf-8')
+            except UnicodeDecodeError:
+                return '\ufffd'  # replacement character for bad utf-8
     
     def encode_angle_sequence(self, angles: List[int]) -> List[int]:
         """

@@ -362,17 +362,60 @@ class RWKVTrainingPipeline:
         
         return result
     
+    def use_existing_data(self,
+                          binidx_prefix: Union[str, Path],
+                          magic_prime: int,
+                          exit_tokens: int) -> None:
+        """
+        Use existing bin/idx data for training
+        
+        This allows you to train on pre-generated bin/idx files,
+        useful for comparison tests or when data is prepared separately.
+        
+        Args:
+            binidx_prefix: Path prefix to .bin and .idx files (without extension)
+            magic_prime: Magic prime for data sampling
+            exit_tokens: Total number of tokens in dataset
+            
+        Example:
+            pipeline.use_existing_data(
+                binidx_prefix="/path/to/train",
+                magic_prime=1733,
+                exit_tokens=111024
+            )
+            pipeline.train(num_epochs=10)
+        """
+        binidx_prefix = Path(binidx_prefix)
+        bin_path = binidx_prefix.with_suffix('.bin')
+        idx_path = binidx_prefix.with_suffix('.idx')
+        
+        if not bin_path.exists():
+            raise FileNotFoundError(f"Bin file not found: {bin_path}")
+        if not idx_path.exists():
+            raise FileNotFoundError(f"Idx file not found: {idx_path}")
+        
+        self.data_prefix = str(binidx_prefix)
+        self.magic_prime = magic_prime
+        self.my_exit_tokens = exit_tokens
+        self.data_prepared = True
+        
+        print(f"### Using existing data:")
+        print(f"    Data prefix: {self.data_prefix}")
+        print(f"    Magic prime: {self.magic_prime}")
+        print(f"    Exit tokens: {self.my_exit_tokens}")
+    
     def _get_train_script_path(self) -> Path:
         """Get path to train.py script"""
         package_dir = Path(__file__).parent.parent.parent
         return package_dir / "train.py"
     
-    def initialize_model(self, force: bool = False) -> Path:
+    def initialize_model(self, force: bool = False, random_seed: int = -1) -> Path:
         """
         Initialize model weights (Stage 1)
         
         Args:
             force: if True, reinitialize even if init file exists
+            random_seed: random seed for model initialization (-1 for random)
             
         Returns:
             Path to initialized model
@@ -390,9 +433,10 @@ class RWKVTrainingPipeline:
         print(f"### Initializing model (Stage 1)...")
         print(f"    Output: {self.output_dir}")
         print(f"    Vocab size: {self.model_config.vocab_size}")
+        print(f"    Random seed: {random_seed}")
         
         # Build command
-        cmd = self._build_train_command(stage=1)
+        cmd = self._build_train_command(stage=1, random_seed=random_seed)
         
         # Run initialization
         self._run_command(cmd, description="Model initialization")
@@ -405,7 +449,8 @@ class RWKVTrainingPipeline:
     def train(self,
               data: Optional[np.ndarray] = None,
               num_epochs: int = 100,
-              continue_training: bool = False) -> None:
+              continue_training: bool = False,
+              random_seed: int = -1) -> None:
         """
         Run complete training pipeline
         
@@ -413,6 +458,7 @@ class RWKVTrainingPipeline:
             data: numpy array of sequences (if None, use prepared data)
             num_epochs: number of training epochs
             continue_training: if True, continue from latest checkpoint in work_dir
+            random_seed: random seed for training (-1 for random)
         """
         # Step 1: Prepare data if provided
         if data is not None:
@@ -422,14 +468,15 @@ class RWKVTrainingPipeline:
         
         # Step 2: Initialize model
         if not self.model_initialized and not continue_training:
-            self.initialize_model()
+            self.initialize_model(random_seed=random_seed)
         
         # Step 3: Train (Stage 3)
         print(f"### Starting training (Stage 3)...")
         print(f"    Epochs: {num_epochs}")
         print(f"    Output: {self.output_dir}")
+        print(f"    Random seed: {random_seed}")
         
-        cmd = self._build_train_command(stage=3, num_epochs=num_epochs, 
+        cmd = self._build_train_command(stage=3, num_epochs=num_epochs, random_seed=random_seed, 
                                        continue_training=continue_training)
         
         self._run_command(cmd, description="Training")
@@ -572,7 +619,8 @@ class RWKVTrainingPipeline:
     def _build_train_command(self, 
                             stage: int,
                             num_epochs: int = 100,
-                            continue_training: bool = False) -> list:
+                            continue_training: bool = False,
+                            random_seed: int = -1) -> list:
         """Build training command"""
         m = self.model_config
         t = self.training_config
@@ -605,6 +653,7 @@ class RWKVTrainingPipeline:
             "--grad_cp", str(t.grad_cp),
             "--precision", t.precision,
             "--strategy", t.strategy,
+            "--random_seed", str(random_seed),
         ]
         
         if stage == 1:
