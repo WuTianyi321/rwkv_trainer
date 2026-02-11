@@ -14,6 +14,9 @@ from data_utils.utils import MaybeIsPrime
 class MyDataset(Dataset):
     def __init__(self, args):
         self.args = args
+        self.global_rank = 0
+        self.world_size = 1
+        self.real_epoch = 0
 
         if args.data_type == "binidx":
             self.vocab_size = args.vocab_size

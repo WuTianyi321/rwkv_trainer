@@ -1,6 +1,6 @@
 [project]
 name = "rwkv-trainer"
-version = "0.1.5"
+version = "0.1.7"
 description = "A packaged RWKV training framework for sequence data"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -23,7 +23,7 @@ dependencies = [
     #   uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
     "pytorch-lightning==1.9.5",  # RWKV-LM requires this specific version
     "lightning-fabric>=1.9.0,<2.0",
-    "deepspeed>=0.9.0",
+    "deepspeed==0.9.5",  # Compatible with pytorch-lightning 1.9.5
     "numpy>=1.20.0",
     "setuptools<82",  # Required for pkg_resources (lightning-fabric dependency)
 ]
