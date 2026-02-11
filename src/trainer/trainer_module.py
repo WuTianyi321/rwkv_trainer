@@ -1,3 +1,8 @@
+########################################################################################################
+# The RWKV Language Model - https://github.com/BlinkDL/RWKV-LM
+# Licensed under the Apache License, Version 2.0
+########################################################################################################
+
 import os, math, time, datetime, subprocess
 import torch
 from torch.utils.data import DataLoader

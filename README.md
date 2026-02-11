@@ -493,4 +493,14 @@ uv run python tests/test_pipeline_simple.py
 
 ## License
 
-Same as RWKV-LM
+This project is licensed under the **Apache License 2.0** - see the [LICENSE](LICENSE) file for details.
+
+This package contains code derived from [RWKV-LM](https://github.com/BlinkDL/RWKV-LM), which is also licensed under Apache 2.0. The following files contain code from the original RWKV-LM repository:
+
+- `src/model/model.py` - RWKV model architecture
+- `src/trainer/trainer_module.py` - Training callbacks and utilities
+- `src/trainer/dataset.py` - Dataset loading
+- `src/data_utils/binidx.py` - Memory-mapped dataset utilities
+- `src/cuda/*` - CUDA kernels for RWKV-5/6/7
+
+All modifications and original code in this package are also licensed under Apache 2.0.
