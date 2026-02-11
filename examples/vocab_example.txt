@@ -1,0 +1,42 @@
+# Example vocabulary file for RWKV Trainer
+# Format: <token_id> <token_string_or_bytes> <length>
+# 
+# Rules:
+# 1. Token ID 0 is RESERVED for end_of_document (usually b'\x00')
+# 2. Token IDs start from 1
+# 3. Token strings can be:
+#    - Quoted strings: 'hello', ' world' (note the leading space)
+#    - Bytes representation: b'\x00', b'\x0a'
+# 4. Length must match the actual byte length of the token
+
+# End of document marker (REQUIRED, must be token 0)
+0 b'\x00' 1
+
+# Single characters
+1 'a' 1
+2 'b' 1
+3 'c' 1
+
+# Multi-character tokens
+4 'hello' 5
+5 'world' 5
+6 'foo' 3
+7 'bar' 3
+
+# Tokens with leading/trailing spaces (common in BPE-style vocabularies)
+8 ' the' 4
+9 ' a' 2
+10 's' 1
+11 'ing' 3
+12 'ed' 2
+
+# Special tokens
+13 '<|endoftext|>' 14
+14 '<|padding|>' 12
+15 '[UNK]' 5
+
+# Chinese characters (UTF-8 encoded)
+16 '中' 3
+17 '文' 3
+18 '测' 3
+19 '试' 3

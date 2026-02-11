@@ -211,12 +211,54 @@ class RWKVTrainingPipeline:
         data = np.load(file_path)
         return self.prepare_data(data, data_name)
     
+    def _detect_jsonl_format(self, jsonl_path: Path) -> str:
+        """
+        Detect JSONL format by trying to parse first few lines
+        
+        Returns:
+            'integer': if all values are integers (space-separated)
+            'text': if contains non-integer tokens
+            'unknown': if cannot determine
+        """
+        try:
+            with open(jsonl_path, 'r', encoding='utf-8') as f:
+                lines = [f.readline().strip() for _ in range(5) if f.readline()]
+            
+            if not lines:
+                return 'unknown'
+            
+            all_integers = True
+            for line in lines:
+                if not line:
+                    continue
+                data = json.loads(line)
+                text = data.get("text", "")
+                tokens = text.split()
+                
+                for token in tokens:
+                    try:
+                        int(token)
+                    except ValueError:
+                        all_integers = False
+                        break
+                if not all_integers:
+                    break
+            
+            return 'integer' if all_integers else 'text'
+        except Exception:
+            return 'unknown'
+    
     def prepare_data_from_jsonl(self,
                                 jsonl_path: Union[str, Path],
                                 data_name: str = "train",
                                 n_epochs: int = None) -> Dict[str, Any]:
         """
-        Prepare existing JSONL file for training
+        Prepare existing JSONL file for training with intelligent format detection
+        
+        This method will:
+        1. Detect if JSONL contains integer sequences or text
+        2. Validate that current tokenizer can handle the format
+        3. Provide helpful error messages if tokenizer mismatch
         
         Args:
             jsonl_path: path to existing JSONL file
@@ -225,17 +267,69 @@ class RWKVTrainingPipeline:
             
         Returns:
             Dictionary with data information
+            
+        Raises:
+            RuntimeError: If tokenizer cannot handle the JSONL format
         """
+        jsonl_path = Path(jsonl_path)
+        if not jsonl_path.exists():
+            raise FileNotFoundError(f"JSONL file not found: {jsonl_path}")
+        
         print(f"### Preparing data from JSONL: {jsonl_path}")
         
+        # Detect format
+        detected_format = self._detect_jsonl_format(jsonl_path)
+        print(f"    Detected format: {detected_format}")
+        
+        # Check if tokenizer can handle the format
+        if detected_format == 'text':
+            # Check if current tokenizer is IntegerTokenizer (which only handles integers)
+            from data_utils.tokenizer import IntegerTokenizer
+            if isinstance(self.tokenizer, IntegerTokenizer):
+                print(f"\n" + "="*70)
+                print("ERROR: JSONL contains text data, but using IntegerTokenizer!")
+                print("="*70)
+                print(f"\nYour JSONL file appears to contain text tokens (e.g., 'hello world'),")
+                print(f"but you are using IntegerTokenizer which only handles integers.")
+                print(f"\nTo fix this, you have two options:")
+                print(f"\n1. Use GenericTokenizer with a custom vocabulary:")
+                print(f"   from rwkv_trainer import GenericTokenizer")
+                print(f"   tokenizer = GenericTokenizer('your_vocab.txt')")
+                print(f"   pipeline = RWKVTrainingPipeline(..., tokenizer=tokenizer)")
+                print(f"\n2. If your data should be integers, check your JSONL format.")
+                print(f"   Expected: {{'text': '1 2 3 4 5'}}")
+                print(f"   Got:      {{'text': 'hello world'}}")
+                print(f"\nSee examples/vocab_example.txt for vocabulary format.")
+                print("="*70 + "\n")
+                raise RuntimeError("Tokenizer mismatch: text data with IntegerTokenizer")
+        
+        # Try to process and catch tokenization errors
         n_epochs = n_epochs or self.data_config.n_epochs_duplication
         
-        result = self.data_pipeline.process_jsonl(
-            jsonl_path=jsonl_path,
-            output_dir=self.data_dir,
-            name=data_name,
-            n_epochs=n_epochs
-        )
+        try:
+            result = self.data_pipeline.process_jsonl(
+                jsonl_path=jsonl_path,
+                output_dir=self.data_dir,
+                name=data_name,
+                n_epochs=n_epochs
+            )
+        except ValueError as e:
+            if "Cannot encode" in str(e):
+                print(f"\n" + "="*70)
+                print("ERROR: Tokenization failed!")
+                print("="*70)
+                print(f"\nThe tokenizer could not encode some tokens in your JSONL file.")
+                print(f"Error: {e}")
+                print(f"\nThis usually means:")
+                print(f"1. Your vocabulary doesn't cover all tokens in the data")
+                print(f"2. You're using the wrong tokenizer for your data type")
+                print(f"\nSolutions:")
+                print(f"- Check that your vocab file contains all necessary tokens")
+                print(f"- Or use a different tokenizer (e.g., IntegerTokenizer for numbers)")
+                print(f"\nSee examples/vocab_example.txt for vocabulary format.")
+                print("="*70 + "\n")
+                raise RuntimeError("Tokenization failed. See error message above.")
+            raise
         
         self.data_prefix = result['binidx_prefix']
         self.magic_prime = result['magic_prime']

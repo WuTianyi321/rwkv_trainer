@@ -57,12 +57,19 @@ from rwkv_trainer import RWKVTrainingPipeline
 
 pipeline = RWKVTrainingPipeline(work_dir="./experiment")
 
-# Prepare from existing JSONL (each line: {"text": "1 2 3 ..."})
+# Prepare from existing JSONL
+# For integer data: {"text": "1 2 3 4 5"}
+# For text data:    {"text": "hello world"} (requires GenericTokenizer)
 pipeline.prepare_data_from_jsonl("my_data.jsonl")
 
 # Train
 pipeline.train(num_epochs=100)
 ```
+
+**JSONL Format Detection:**
+- Automatically detects if data is integers (e.g., `"1 2 3"`) or text (e.g., `"hello"`)
+- If using `IntegerTokenizer` (default) with text data, you'll get a helpful error message
+- For text data, use `GenericTokenizer` with a custom vocabulary
 
 ### Example 3: Custom Vocabulary
 
@@ -270,6 +277,29 @@ tokenizer = GenericTokenizer("vocab.txt")
 tokens = tokenizer.encode("hello world!")  # [1, 2, 3, 4]
 ```
 
+#### Vocabulary File Format
+
+Vocabulary files follow the RWKV-LM format (see `examples/vocab_example.txt`):
+
+```
+# Format: <token_id> <token_string_or_bytes> <byte_length>
+# Token 0 is RESERVED for end_of_document
+
+0 b'\x00' 1              # End of document marker (REQUIRED)
+1 'hello' 5              # String token
+2 ' world' 6             # String with leading space
+3 b'\x0a' 1              # Byte token (newline)
+4 '<|special|>' 12       # Special token
+```
+
+**Rules:**
+- Token ID **0** is **RESERVED** for end_of_document (usually `b'\x00'`)
+- Token IDs start from **1**
+- Strings must be quoted with `'`
+- Bytes must use `b'...'` notation
+- `<byte_length>` must match actual byte length of the token
+- UTF-8 characters are supported (e.g., Chinese: `'中'` has length 3)
+
 ### AngleTokenizer (Specialized)
 
 For angle data 0-359 degrees (backward compatibility):
@@ -304,6 +334,40 @@ tokens = tokenizer.encode_angle_sequence([0, 45, 90])  # [1, 46, 91]
 | `micro_bsz` | 16 | Batch size per GPU |
 | `grad_cp` | 1 | Gradient checkpointing |
 | `precision` | "bf16" | "bf16", "fp16", or "fp32" |
+
+---
+
+## Troubleshooting
+
+### Error: "JSONL contains text data, but using IntegerTokenizer!"
+
+**Cause:** Your JSONL file has text tokens (e.g., `{"text": "hello"}`), but the default `IntegerTokenizer` only handles integers.
+
+**Solution:**
+```python
+from rwkv_trainer import GenericTokenizer
+
+# Use GenericTokenizer with a custom vocabulary
+tokenizer = GenericTokenizer("your_vocab.txt")
+pipeline = RWKVTrainingPipeline(..., tokenizer=tokenizer)
+pipeline.prepare_data_from_jsonl("text_data.jsonl")
+```
+
+### Error: "Cannot encode byte at position X"
+
+**Cause:** Your vocabulary doesn't contain a token present in the data.
+
+**Solution:** Check that your vocab file contains all tokens in your JSONL. Use `create_vocab_file_from_tokens()` to create a vocabulary from your data.
+
+### Error: "Vocab size mismatch"
+
+**Cause:** When resuming from a checkpoint, the checkpoint's vocab_size doesn't match your tokenizer.
+
+**Solution:** Use a tokenizer with matching vocab_size:
+```python
+# If checkpoint has vocab_size=65536
+tokenizer = IntegerTokenizer(max_value=65535)  # 65535 + 1 for end_of_doc = 65536
+```
 
 ---
 
