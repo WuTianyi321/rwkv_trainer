@@ -406,7 +406,7 @@ class RWKVTrainingPipeline:
     
     def _get_train_script_path(self) -> Path:
         """Get path to train.py script"""
-        package_dir = Path(__file__).parent.parent.parent
+        package_dir = Path(__file__).parent.parent
         return package_dir / "train.py"
     
     def initialize_model(self, force: bool = False, random_seed: int = -1) -> Path:

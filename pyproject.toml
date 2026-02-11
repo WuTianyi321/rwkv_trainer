@@ -1,6 +1,6 @@
 [project]
 name = "rwkv-trainer"
-version = "0.1.0"
+version = "0.1.4"
 description = "A packaged RWKV training framework for sequence data"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -50,9 +50,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
+include = ["train.py"]
 
 [tool.hatch.build.targets.wheel.sources]
 "src" = "rwkv_trainer"
+"train.py" = "rwkv_trainer/train.py"
 
 [tool.black]
 line-length = 100
