@@ -121,7 +121,8 @@ class JsonlToBinIdxConverter:
                 jsonl_path: Union[str, Path],
                 output_prefix: Union[str, Path],
                 n_epochs: int = 3,
-                shuffle: bool = True) -> Path:
+                shuffle: bool = True,
+                random_seed: Optional[int] = None) -> Path:
         """
         Convert JSONL to bin/idx format
         
@@ -130,6 +131,7 @@ class JsonlToBinIdxConverter:
             output_prefix: output file prefix (without extension)
             n_epochs: number of times to duplicate and shuffle data
             shuffle: whether to shuffle data
+            random_seed: optional random seed for reproducible shuffling
             
         Returns:
             Path to output prefix
@@ -137,6 +139,11 @@ class JsonlToBinIdxConverter:
         jsonl_path = Path(jsonl_path)
         output_prefix = Path(output_prefix)
         output_prefix.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Set random seed if provided (for reproducibility)
+        if random_seed is not None:
+            random.seed(random_seed)
+            print(f"### Using fixed random seed: {random_seed}")
         
         # Load JSONL
         with open(jsonl_path, 'r', encoding='utf-8') as f:
