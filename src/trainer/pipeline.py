@@ -673,7 +673,6 @@ class RWKVTrainingPipeline:
                 "--magic_prime", str(self.magic_prime),
                 "--accelerator", "gpu",
                 "--devices", "1",
-                "--enable_progress_bar", "True",
             ])
         
         return cmd

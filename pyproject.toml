@@ -1,6 +1,6 @@
 [project]
 name = "rwkv-trainer"
-version = "0.1.4"
+version = "0.1.5"
 description = "A packaged RWKV training framework for sequence data"
 readme = "README.md"
 license = {text = "Apache-2.0"}
