@@ -2,75 +2,82 @@
 # Format: <token_id> <token_string_or_bytes> <byte_length>
 # 
 # IMPORTANT NOTES:
-# 1. Token IDs start from 1 (NOT 0)
-#    - Token 0 is RESERVED internally for end_of_document
-#    - This follows RWKV-LM convention
-# 2. Token strings can be:
-#    - Quoted strings: 'hello', ' world' (note the leading space)
-#    - Special characters: '\n', '\t', '\x00'
-#    - Bytes representation: b'\xff' (for binary data)
-# 3. Length must match the actual byte length of the token
-# 4. UTF-8 characters are supported (Chinese, emoji, etc.)
+# 1. Token 0 is RESERVED internally for end_of_document marker
+#    - It has no specific byte representation in the vocab file
+#    - It is automatically added by the tokenizer
+# 2. Token IDs in the vocab file start from 1
+# 3. The converter automatically appends token 0 after each document
+#
+# Rules:
+# - Token strings can be:
+#   - Quoted strings: 'hello', ' world' (note the leading space)
+#   - Special characters: '\n', '\t', '\x00' (the actual null byte character)
+#   - Bytes representation: b'\xff' (for binary data)
+# - Length must match the actual byte length of the token
+# - UTF-8 characters are supported (Chinese, emoji, etc.)
 
-# Single characters (note: token 1 can be '\x00' like RWKV default)
-1 '\x00' 1
-2 '\x01' 1
-3 '\x02' 1
-4 '\x03' 1
-5 'a' 1
-6 'b' 1
-7 'c' 1
-8 'd' 1
-9 'e' 1
+# Note: Token 0 (end_of_document) is automatically handled by the tokenizer
+# You don't need to define it in the vocab file for GenericTokenizer
+
+# Single characters (starting from token 1)
+1 'a' 1
+2 'b' 1
+3 'c' 1
+4 'd' 1
+5 'e' 1
 
 # Whitespace and punctuation
-10 ' ' 1
-11 '\t' 1
-12 '\n' 1
-13 '.' 1
-14 ',' 1
-15 '!' 1
-16 '?' 1
+6 ' ' 1
+7 '\t' 1
+8 '\n' 1
+9 '.' 1
+10 ',' 1
+11 '!' 1
+12 '?' 1
 
 # Multi-character tokens
-17 'the' 3
-18 'and' 3
-19 'ing' 3
-20 'tion' 4
-21 'world' 5
-22 'hello' 5
+13 'the' 3
+14 'and' 3
+15 'ing' 3
+16 'tion' 4
+17 'world' 5
+18 'hello' 5
 
 # Tokens with leading spaces (common in BPE)
-23 ' the' 4
-24 ' a' 2
-25 ' s' 2
-26 'ed' 2
-27 'ly' 2
+19 ' the' 4
+20 ' a' 2
+21 ' s' 2
+22 'ed' 2
+23 'ly' 2
 
 # Numbers as strings
-28 '0' 1
-29 '1' 1
-30 '2' 1
-31 '10' 2
-32 '100' 3
+24 '0' 1
+25 '1' 1
+26 '2' 1
+27 '10' 2
+28 '100' 3
 
 # Special tokens
-33 '<|endoftext|>' 14
-34 '<|padding|>' 12
-35 '[UNK]' 5
-36 '[CLS]' 5
-37 '[SEP]' 5
-38 '[MASK]' 6
+29 '<|endoftext|>' 14
+30 '<|padding|>' 12
+31 '[UNK]' 5
+32 '[CLS]' 5
+33 '[SEP]' 5
+34 '[MASK]' 6
 
 # Chinese characters (UTF-8, 3 bytes each)
-39 '中' 3
-40 '文' 3
-41 '测' 3
-42 '试' 3
-43 '模' 3
-44 '型' 3
+35 '中' 3
+36 '文' 3
+37 '测' 3
+38 '试' 3
+39 '模' 3
+40 '型' 3
 
 # Emoji (UTF-8, 4 bytes each)
-45 '😀' 4
-46 '🎉' 4
-47 '🔥' 4
+41 '😀' 4
+42 '🎉' 4
+43 '🔥' 4
+
+# Note: The null byte '\x00' can be a regular token if needed
+# (e.g., for binary data), but token 0 is always end_of_document
+44 '\x00' 1

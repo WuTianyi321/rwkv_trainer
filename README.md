@@ -293,25 +293,24 @@ Vocabulary files follow the RWKV-LM format (see `examples/vocab_example.txt`):
 
 ```
 # Format: <token_id> <token_string_or_bytes> <byte_length>
-# Note: Token IDs start from 1 (Token 0 is reserved internally for end_of_document)
+# Note: Token 0 is RESERVED for end_of_document, vocab starts from 1
 
-1 '\x00' 1               # First token (can be '\x00' like RWKV default)
-2 '\x01' 1               # Control characters
-3 'hello' 5              # String token
-4 ' world' 6             # String with leading space
-5 '\n' 1                 # Newline character
-6 '<|special|>' 12       # Special token
+1 'a' 1                  # Single character
+2 'hello' 5              # String token  
+3 ' world' 6             # String with leading space
+4 '\n' 1                 # Newline character
+5 '<|special|>' 12       # Special token
 ```
 
 **Important Rules:**
-- ⚠️ **Token IDs start from 1** (NOT 0)
-- Token 0 is **RESERVED internally** for `end_of_document` marker
-- This follows RWKV-LM convention (see their `rwkv_vocab_v20230424.txt`)
+- ⚠️ **Token 0 is RESERVED internally** for `end_of_document` marker
+  - It is **automatically added** by the converter after each document
+  - You **don't need to define** token 0 in the vocab file
+- **Vocab file starts from token 1**
 - Strings must be quoted with `'` (single quotes)
-- Special characters can be escaped: `'\n'`, `'\t'`, `'\x00'`
-- Bytes must use `b'...'` notation for binary data
-- `<byte_length>` must match actual UTF-8 byte length of the token
-- UTF-8 characters are supported (e.g., Chinese `'中'` has length 3, emoji '😀' has length 4)
+- Special characters can be escaped: `'\n'`, `'\t'`, `'\x00'` (null byte character)
+- `<byte_length>` must match actual UTF-8 byte length
+- UTF-8 supported (Chinese `'中'` = 3 bytes, emoji '😀' = 4 bytes)
 
 ### AngleTokenizer (Specialized)
 

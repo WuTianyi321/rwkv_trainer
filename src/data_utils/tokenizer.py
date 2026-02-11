@@ -82,19 +82,21 @@ class BaseTokenizer(ABC):
 
 class GenericTokenizer(BaseTokenizer):
     """
-    Generic tokenizer that loads vocabulary from file
+    Generic tokenizer that loads vocabulary from file (RWKV-LM compatible)
     
-    Vocab file format (RWKV-LM style, token IDs start from 1):
+    Vocab file format (same as RWKV-LM):
         <token_id> <token_string_or_bytes_repr> <length>
     
-    Example:
-        1 'hello' 5
-        2 'world' 5
-        3 '\n' 1
+    Example (following RWKV-LM convention):
+        0 '\x00' 1              # Token 0 is end_of_doc (null byte)
+        1 ' ' 1                 # Space
+        2 'the' 3               # Word
+        3 '\n' 1                # Newline
     
     Note:
-        - Token 0 is RESERVED internally for end_of_document
-        - Vocab file should start from 1 (following RWKV convention)
+        - Token 0 is typically '\x00' (null byte) used as end_of_document marker
+        - Following RWKV-LM convention, vocab files usually include '\x00' as token 0
+        - This tokenizer directly loads the vocab file without modification
     """
     
     def __init__(self, vocab_file: str):
@@ -109,10 +111,6 @@ class GenericTokenizer(BaseTokenizer):
         self.vocab_file = vocab_file
         
         self._load_from_file(vocab_file)
-        
-        # Add internal end_of_doc token (0)
-        self.idx2token[0] = b'\x00'
-        self.token2idx[b'\x00'] = 0
         
         # Build TRIE for encoding
         self.root = TRIE()
@@ -377,16 +375,21 @@ class IntegerTokenizer(BaseTokenizer):
             _ = self.root.add(t, val=(t, i))
     
     def _create_vocab(self):
-        """Create vocabulary for integers 0 to max_value"""
+        """Create vocabulary for integers 0 to max_value
+        
+        Note: Token 0 is reserved internally for end_of_document marker.
+        Integer tokens start from 1 (i.e., integer 0 -> token 1, integer 1 -> token 2, etc.)
+        """
+        # Token 0 is reserved for end_of_document (no specific byte representation)
+        self.idx2token[0] = b''  # Empty bytes for internal use
+        self.token2idx[b''] = 0
+        
+        # Integer tokens start from 1
         for i in range(self.max_value + 1):
             token_str = str(i)
             token_bytes = token_str.encode('utf-8')
             self.idx2token[i + 1] = token_bytes  # +1 because 0 is reserved
             self.token2idx[token_bytes] = i + 1
-        
-        # Token 0 is end_of_doc
-        self.idx2token[0] = b'\x00'
-        self.token2idx[b'\x00'] = 0
     
     def _load_from_file(self, vocab_file: str):
         """Load vocabulary from file"""
