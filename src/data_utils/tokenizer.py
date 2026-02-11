@@ -84,13 +84,17 @@ class GenericTokenizer(BaseTokenizer):
     """
     Generic tokenizer that loads vocabulary from file
     
-    Vocab file format (same as RWKV-LM):
+    Vocab file format (RWKV-LM style, token IDs start from 1):
         <token_id> <token_string_or_bytes_repr> <length>
     
     Example:
-        0 'hello' 5
-        1 'world' 5
-        2 b'\x00' 1
+        1 'hello' 5
+        2 'world' 5
+        3 '\n' 1
+    
+    Note:
+        - Token 0 is RESERVED internally for end_of_document
+        - Vocab file should start from 1 (following RWKV convention)
     """
     
     def __init__(self, vocab_file: str):
@@ -102,8 +106,13 @@ class GenericTokenizer(BaseTokenizer):
         """
         self.idx2token = {}
         self.token2idx = {}
+        self.vocab_file = vocab_file
         
         self._load_from_file(vocab_file)
+        
+        # Add internal end_of_doc token (0)
+        self.idx2token[0] = b'\x00'
+        self.token2idx[b'\x00'] = 0
         
         # Build TRIE for encoding
         self.root = TRIE()
@@ -117,7 +126,7 @@ class GenericTokenizer(BaseTokenizer):
         
         for line in lines:
             line = line.strip()
-            if not line:
+            if not line or line.startswith('#'):
                 continue
             idx = int(line[:line.index(' ')])
             x = eval(line[line.index(' '):line.rindex(' ')])

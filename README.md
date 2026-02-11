@@ -57,19 +57,29 @@ from rwkv_trainer import RWKVTrainingPipeline
 
 pipeline = RWKVTrainingPipeline(work_dir="./experiment")
 
-# Prepare from existing JSONL
 # For integer data: {"text": "1 2 3 4 5"}
-# For text data:    {"text": "hello world"} (requires GenericTokenizer)
 pipeline.prepare_data_from_jsonl("my_data.jsonl")
 
 # Train
 pipeline.train(num_epochs=100)
 ```
 
+**For text data with vocabulary file:**
+
+```python
+# If your JSONL contains text (e.g., {"text": "hello world"})
+# Pass vocabulary file directly:
+pipeline.prepare_data_from_jsonl(
+    "text_data.jsonl",
+    vocab_file_path="your_vocab.txt"
+)
+pipeline.train(num_epochs=100)
+```
+
 **JSONL Format Detection:**
 - Automatically detects if data is integers (e.g., `"1 2 3"`) or text (e.g., `"hello"`)
-- If using `IntegerTokenizer` (default) with text data, you'll get a helpful error message
-- For text data, use `GenericTokenizer` with a custom vocabulary
+- If using `IntegerTokenizer` (default) with text data, you'll get a helpful error message with solutions
+- For text data, either pass `vocab_file_path` to `prepare_data_from_jsonl()` or use `GenericTokenizer`
 
 ### Example 3: Custom Vocabulary
 
@@ -283,22 +293,25 @@ Vocabulary files follow the RWKV-LM format (see `examples/vocab_example.txt`):
 
 ```
 # Format: <token_id> <token_string_or_bytes> <byte_length>
-# Token 0 is RESERVED for end_of_document
+# Note: Token IDs start from 1 (Token 0 is reserved internally for end_of_document)
 
-0 b'\x00' 1              # End of document marker (REQUIRED)
-1 'hello' 5              # String token
-2 ' world' 6             # String with leading space
-3 b'\x0a' 1              # Byte token (newline)
-4 '<|special|>' 12       # Special token
+1 '\x00' 1               # First token (can be '\x00' like RWKV default)
+2 '\x01' 1               # Control characters
+3 'hello' 5              # String token
+4 ' world' 6             # String with leading space
+5 '\n' 1                 # Newline character
+6 '<|special|>' 12       # Special token
 ```
 
-**Rules:**
-- Token ID **0** is **RESERVED** for end_of_document (usually `b'\x00'`)
-- Token IDs start from **1**
-- Strings must be quoted with `'`
-- Bytes must use `b'...'` notation
-- `<byte_length>` must match actual byte length of the token
-- UTF-8 characters are supported (e.g., Chinese: `'中'` has length 3)
+**Important Rules:**
+- ⚠️ **Token IDs start from 1** (NOT 0)
+- Token 0 is **RESERVED internally** for `end_of_document` marker
+- This follows RWKV-LM convention (see their `rwkv_vocab_v20230424.txt`)
+- Strings must be quoted with `'` (single quotes)
+- Special characters can be escaped: `'\n'`, `'\t'`, `'\x00'`
+- Bytes must use `b'...'` notation for binary data
+- `<byte_length>` must match actual UTF-8 byte length of the token
+- UTF-8 characters are supported (e.g., Chinese `'中'` has length 3, emoji '😀' has length 4)
 
 ### AngleTokenizer (Specialized)
 
@@ -343,11 +356,18 @@ tokens = tokenizer.encode_angle_sequence([0, 45, 90])  # [1, 46, 91]
 
 **Cause:** Your JSONL file has text tokens (e.g., `{"text": "hello"}`), but the default `IntegerTokenizer` only handles integers.
 
-**Solution:**
+**Solution 1:** Pass vocabulary file directly to `prepare_data_from_jsonl()`:
+```python
+pipeline.prepare_data_from_jsonl(
+    "text_data.jsonl",
+    vocab_file_path="your_vocab.txt"
+)
+```
+
+**Solution 2:** Initialize pipeline with `GenericTokenizer`:
 ```python
 from rwkv_trainer import GenericTokenizer
 
-# Use GenericTokenizer with a custom vocabulary
 tokenizer = GenericTokenizer("your_vocab.txt")
 pipeline = RWKVTrainingPipeline(..., tokenizer=tokenizer)
 pipeline.prepare_data_from_jsonl("text_data.jsonl")

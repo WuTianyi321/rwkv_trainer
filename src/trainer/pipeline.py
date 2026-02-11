@@ -251,19 +251,23 @@ class RWKVTrainingPipeline:
     def prepare_data_from_jsonl(self,
                                 jsonl_path: Union[str, Path],
                                 data_name: str = "train",
-                                n_epochs: int = None) -> Dict[str, Any]:
+                                n_epochs: int = None,
+                                vocab_file_path: Optional[str] = None) -> Dict[str, Any]:
         """
         Prepare existing JSONL file for training with intelligent format detection
         
         This method will:
         1. Detect if JSONL contains integer sequences or text
         2. Validate that current tokenizer can handle the format
-        3. Provide helpful error messages if tokenizer mismatch
+        3. Load custom vocabulary if provided (for text data)
+        4. Provide helpful error messages if tokenizer mismatch
         
         Args:
             jsonl_path: path to existing JSONL file
             data_name: name for this dataset
             n_epochs: number of epochs for data duplication (default: from data_config)
+            vocab_file_path: optional path to vocabulary file for text data
+                            (if provided, will create GenericTokenizer automatically)
             
         Returns:
             Dictionary with data information
@@ -276,6 +280,16 @@ class RWKVTrainingPipeline:
             raise FileNotFoundError(f"JSONL file not found: {jsonl_path}")
         
         print(f"### Preparing data from JSONL: {jsonl_path}")
+        
+        # If vocab file provided, create GenericTokenizer automatically
+        if vocab_file_path:
+            print(f"    Loading vocabulary from: {vocab_file_path}")
+            from data_utils.tokenizer import GenericTokenizer
+            self.tokenizer = GenericTokenizer(vocab_file_path)
+            self.data_pipeline = DataPipeline(self.tokenizer)
+            self.model_config.vocab_size = self.tokenizer.vocab_size
+            self._save_config()
+            print(f"    Vocab size: {self.tokenizer.vocab_size}")
         
         # Detect format
         detected_format = self._detect_jsonl_format(jsonl_path)
@@ -292,11 +306,16 @@ class RWKVTrainingPipeline:
                 print(f"\nYour JSONL file appears to contain text tokens (e.g., 'hello world'),")
                 print(f"but you are using IntegerTokenizer which only handles integers.")
                 print(f"\nTo fix this, you have two options:")
-                print(f"\n1. Use GenericTokenizer with a custom vocabulary:")
+                print(f"\n1. Pass vocabulary file directly to prepare_data_from_jsonl():")
+                print(f"   pipeline.prepare_data_from_jsonl(")
+                print(f"       'data.jsonl',")
+                print(f"       vocab_file_path='your_vocab.txt'")
+                print(f"   )")
+                print(f"\n2. Or initialize pipeline with GenericTokenizer:")
                 print(f"   from rwkv_trainer import GenericTokenizer")
                 print(f"   tokenizer = GenericTokenizer('your_vocab.txt')")
                 print(f"   pipeline = RWKVTrainingPipeline(..., tokenizer=tokenizer)")
-                print(f"\n2. If your data should be integers, check your JSONL format.")
+                print(f"\n3. If your data should be integers, check your JSONL format.")
                 print(f"   Expected: {{'text': '1 2 3 4 5'}}")
                 print(f"   Got:      {{'text': 'hello world'}}")
                 print(f"\nSee examples/vocab_example.txt for vocabulary format.")
@@ -324,8 +343,8 @@ class RWKVTrainingPipeline:
                 print(f"1. Your vocabulary doesn't cover all tokens in the data")
                 print(f"2. You're using the wrong tokenizer for your data type")
                 print(f"\nSolutions:")
-                print(f"- Check that your vocab file contains all necessary tokens")
-                print(f"- Or use a different tokenizer (e.g., IntegerTokenizer for numbers)")
+                print(f"- Pass vocab_file_path to prepare_data_from_jsonl()")
+                print(f"- Or check that your vocab file contains all necessary tokens")
                 print(f"\nSee examples/vocab_example.txt for vocabulary format.")
                 print("="*70 + "\n")
                 raise RuntimeError("Tokenization failed. See error message above.")
