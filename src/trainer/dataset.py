@@ -14,9 +14,6 @@ from data_utils.utils import MaybeIsPrime
 class MyDataset(Dataset):
     def __init__(self, args):
         self.args = args
-        self.global_rank = 0
-        self.world_size = 1
-        self.real_epoch = 0
 
         if args.data_type == "binidx":
             self.vocab_size = args.vocab_size
@@ -104,9 +101,10 @@ class MyDataset(Dataset):
 
     def __getitem__(self, idx):
         args = self.args
-        rank = self.global_rank
-        epoch = self.real_epoch
-        world_size = self.world_size
+        # Use getattr with defaults for compatibility with DeepSpeed multi-process
+        rank = getattr(self, 'global_rank', 0)
+        epoch = getattr(self, 'real_epoch', 0)
+        world_size = getattr(self, 'world_size', 1)
         # print(f"epoch {epoch} idx {idx} rank {rank}/{world_size}")
 
         if args.data_type == "uint16":

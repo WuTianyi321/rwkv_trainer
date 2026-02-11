@@ -168,7 +168,7 @@ class train_callback(pl.Callback):
                     )
                 
 
-    def on_train_epoch_start(self, trainer, pl_module):
+    def on_train_start(self, trainer, pl_module):
         args = self.args
         if pl.__version__[0]=='2':
             dataset = trainer.train_dataloader.dataset
@@ -179,6 +179,15 @@ class train_callback(pl.Callback):
         dataset.real_epoch = int(args.epoch_begin + trainer.current_epoch)
         dataset.world_size = trainer.world_size
         # print(f'########## world_size {dataset.world_size} global_rank {dataset.global_rank} real_epoch {dataset.real_epoch} ##########')
+
+    def on_train_epoch_start(self, trainer, pl_module):
+        args = self.args
+        if pl.__version__[0]=='2':
+            dataset = trainer.train_dataloader.dataset
+        else:
+            dataset = trainer.train_dataloader.dataset.datasets
+        assert "MyDataset" in str(dataset)
+        dataset.real_epoch = int(args.epoch_begin + trainer.current_epoch)
 
     def on_train_epoch_end(self, trainer, pl_module):
         args = self.args
