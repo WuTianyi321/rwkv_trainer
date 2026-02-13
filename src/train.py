@@ -14,11 +14,6 @@ from pathlib import Path
 script_dir = Path(__file__).parent
 sys.path.insert(0, str(script_dir / "src"))
 
-from model.model import RWKV
-from trainer.trainer_module import train_callback, generate_init_weight
-from data_utils.binidx import MMapIndexedDataset
-from data_utils.utils import MaybeIsPrime
-
 import logging
 logging.basicConfig(level=logging.INFO)
 
@@ -261,6 +256,7 @@ if __name__ == "__main__":
 
     ########################################################################################################
 
+    from model.model import RWKV
     from trainer.trainer_module import train_callback, generate_init_weight
     from trainer.dataset import MyDataset
 

@@ -4,6 +4,7 @@
 
 import os, math, gc, importlib
 import torch
+from torch.utils.checkpoint import checkpoint as torch_checkpoint
 
 # Get absolute path to cuda directory
 CUDA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'cuda')
@@ -14,9 +15,14 @@ from torch.nn import functional as F
 import pytorch_lightning as pl
 from pytorch_lightning.utilities import rank_zero_info, rank_zero_only
 from pytorch_lightning.strategies import DeepSpeedStrategy
-if importlib.util.find_spec('deepspeed'):
+_HAS_DEEPSPEED = importlib.util.find_spec('deepspeed') is not None
+if _HAS_DEEPSPEED:
     import deepspeed
     from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
+else:
+    deepspeed = None
+    DeepSpeedCPUAdam = None
+    FusedAdam = None
 
 # from deepspeed.runtime.fp16.onebit.zoadam import ZeroOneAdam
 
@@ -25,13 +31,21 @@ try:
 except:
     os.environ["RWKV_MY_TESTING"] = ''
 
+# Safe defaults so importing model.py does not hard-fail when caller
+# hasn't pre-populated RWKV_* env vars yet.
+os.environ.setdefault("RWKV_JIT_ON", "0")
+os.environ.setdefault("RWKV_HEAD_SIZE_A", "64")
+os.environ.setdefault("RWKV_CTXLEN", "1024")
+os.environ.setdefault("RWKV_TRAIN_TYPE", "")
+os.environ.setdefault("RWKV_FLOAT_MODE", "bf16")
+
 def __nop(ob):
     return ob
 
 
 MyModule = nn.Module
 MyFunction = __nop
-if os.environ["RWKV_JIT_ON"] == "1":
+if os.environ.get("RWKV_JIT_ON", "0") == "1":
     MyModule = torch.jit.ScriptModule
     MyFunction = torch.jit.script_method
 
@@ -1302,13 +1316,17 @@ class RWKV(pl.LightningModule):
 
         if args.weight_decay > 0:
             optim_groups += [{"params": [param_dict[n] for n in lr_decay], "weight_decay": args.weight_decay, "my_lr_scale": 1.0}]
-            if self.deepspeed_offload:
+            if self.deepspeed_offload and DeepSpeedCPUAdam is not None:
                 return DeepSpeedCPUAdam(optim_groups, lr=self.args.lr_init, betas=self.args.betas, eps=self.args.adam_eps, bias_correction=True, adamw_mode=True, amsgrad=False)
-            return FusedAdam(optim_groups, lr=self.args.lr_init, betas=self.args.betas, eps=self.args.adam_eps, bias_correction=True, adam_w_mode=True, amsgrad=False)
+            if FusedAdam is not None:
+                return FusedAdam(optim_groups, lr=self.args.lr_init, betas=self.args.betas, eps=self.args.adam_eps, bias_correction=True, adam_w_mode=True, amsgrad=False)
+            return torch.optim.AdamW(optim_groups, lr=self.args.lr_init, betas=self.args.betas, eps=self.args.adam_eps, weight_decay=0.0)
         else:
-            if self.deepspeed_offload:
+            if self.deepspeed_offload and DeepSpeedCPUAdam is not None:
                 return DeepSpeedCPUAdam(optim_groups, lr=self.args.lr_init, betas=self.args.betas, eps=self.args.adam_eps, bias_correction=True, adamw_mode=False, weight_decay=0, amsgrad=False)
-            return FusedAdam(optim_groups, lr=self.args.lr_init, betas=self.args.betas, eps=self.args.adam_eps, bias_correction=True, adam_w_mode=False, weight_decay=0, amsgrad=False)
+            if FusedAdam is not None:
+                return FusedAdam(optim_groups, lr=self.args.lr_init, betas=self.args.betas, eps=self.args.adam_eps, bias_correction=True, adam_w_mode=False, weight_decay=0, amsgrad=False)
+            return torch.optim.AdamW(optim_groups, lr=self.args.lr_init, betas=self.args.betas, eps=self.args.adam_eps, weight_decay=0.0)
         # return ZeroOneAdam(optim_groups, lr=self.args.lr_init, betas=self.args.betas, eps=self.args.adam_eps, bias_correction=True, weight_decay=0, amsgrad=False, cuda_aware=False)
 
     @property
@@ -1324,6 +1342,11 @@ class RWKV(pl.LightningModule):
         B, T = idx.size()
         assert T <= args.ctx_len, "Cannot forward, model ctx_len is exhausted."
 
+        def run_checkpoint(fn, *fn_args):
+            if _HAS_DEEPSPEED:
+                return deepspeed.checkpointing.checkpoint(fn, *fn_args)
+            return torch_checkpoint(fn, *fn_args, use_reentrant=False)
+
         x = self.emb(idx)
         x_emb = x
 
@@ -1332,7 +1355,7 @@ class RWKV(pl.LightningModule):
         if args.tiny_att_dim > 0:
             for block in self.blocks:
                 if args.grad_cp == 1:
-                    x = deepspeed.checkpointing.checkpoint(block, x, x_emb)
+                    x = run_checkpoint(block, x, x_emb)
                 else:
                     x = block(x, x_emb)
         else:
@@ -1340,13 +1363,13 @@ class RWKV(pl.LightningModule):
                 v_first = torch.empty_like(x)
                 for block in self.blocks:
                     if args.grad_cp == 1:
-                        x, v_first = deepspeed.checkpointing.checkpoint(block, x, v_first)
+                        x, v_first = run_checkpoint(block, x, v_first)
                     else:
                         x, v_first = block(x, v_first)
             else:
                 for block in self.blocks:
                     if args.grad_cp == 1:
-                        x = deepspeed.checkpointing.checkpoint(block, x)
+                        x = run_checkpoint(block, x)
                     else:
                         x = block(x)
 

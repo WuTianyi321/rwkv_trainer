@@ -270,6 +270,23 @@ class DataPipeline:
         self.tokenizer = tokenizer or IntegerTokenizer(max_value=359)
         self.numpy_converter = NumpyToJsonlConverter()
         self.jsonl_converter = JsonlToBinIdxConverter(self.tokenizer)
+
+    def process(self,
+                data: np.ndarray,
+                output_dir: Union[str, Path],
+                name: str = "data",
+                sequence_length: int = 1024,
+                n_epochs: int = 3) -> dict:
+        """
+        Backward-compatible alias for processing numpy data.
+        """
+        return self.process_numpy(
+            data=data,
+            output_dir=output_dir,
+            name=name,
+            sequence_length=sequence_length,
+            n_epochs=n_epochs,
+        )
     
     def process_numpy(self,
                      data: np.ndarray,
