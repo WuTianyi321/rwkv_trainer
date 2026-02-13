@@ -43,39 +43,106 @@ if os.environ["RWKV_JIT_ON"] == "1":
 from torch.utils.cpp_extension import load
 
 HEAD_SIZE = int(os.environ["RWKV_HEAD_SIZE_A"])
+_X070_USE_TORCH_FALLBACK = False
+
+
+def _run_torch_rwkv7g(q, w, k, v, a, b):
+    """
+    PyTorch fallback for RWKV-7 wind_backstepping kernel.
+    This follows the same recurrence as src/cuda/wkv7_cuda.cu.
+    """
+    B, T, HC = q.shape
+    if HC % HEAD_SIZE != 0:
+        raise ValueError(f"HC ({HC}) must be divisible by HEAD_SIZE ({HEAD_SIZE})")
+
+    H = HC // HEAD_SIZE
+    C = HEAD_SIZE
+
+    qf = q.reshape(B, T, H, C).float()
+    wf = w.reshape(B, T, H, C).float()
+    kf = k.reshape(B, T, H, C).float()
+    vf = v.reshape(B, T, H, C).float()
+    af = a.reshape(B, T, H, C).float()
+    bf = b.reshape(B, T, H, C).float()
+
+    state = torch.zeros((B, H, C, C), device=q.device, dtype=torch.float32)
+    ys = []
+    for t in range(T):
+        qt = qf[:, t]
+        wt = torch.exp(-torch.exp(wf[:, t]))
+        kt = kf[:, t]
+        vt = vf[:, t]
+        at = af[:, t]
+        bt = bf[:, t]
+
+        sa = torch.einsum("bhj,bhij->bhi", at, state)
+        state = (
+            state * wt.unsqueeze(-2)
+            + sa.unsqueeze(-1) * bt.unsqueeze(-2)
+            + vt.unsqueeze(-1) * kt.unsqueeze(-2)
+        )
+        yt = torch.einsum("bhij,bhj->bhi", state, qt)
+        ys.append(yt)
+
+    y = torch.stack(ys, dim=1).reshape(B, T, HC)
+    return y.to(dtype=q.dtype)
 
 if 'x070' in os.environ["RWKV_MY_TESTING"]:
     CHUNK_LEN = 16
 
     flags = ['-res-usage', f'-D_C_={HEAD_SIZE}', f"-D_CHUNK_LEN_={CHUNK_LEN}", "--use_fast_math", "-O3", "-Xptxas -O3", "--extra-device-vectorization"]
-    load(name="wind_backstepping", sources=[f'{CUDA_DIR}/wkv7_cuda.cu', f'{CUDA_DIR}/wkv7_op.cpp'], is_python_module=False, verbose=True, extra_cuda_cflags=flags)
+    force_fallback = os.environ.get("RWKV_TORCH_FALLBACK", "0") == "1"
+    if not force_fallback:
+        try:
+            load(
+                name="wind_backstepping",
+                sources=[f'{CUDA_DIR}/wkv7_cuda.cu', f'{CUDA_DIR}/wkv7_op.cpp'],
+                is_python_module=False,
+                verbose=True,
+                extra_cuda_cflags=flags
+            )
+        except Exception as e:
+            _X070_USE_TORCH_FALLBACK = True
+            print(f"RWKV x070 CUDA kernel load failed. Falling back to PyTorch implementation. Error: {e}")
+    else:
+        _X070_USE_TORCH_FALLBACK = True
+        print("RWKV x070: forcing PyTorch fallback (RWKV_TORCH_FALLBACK=1).")
 
-    class WindBackstepping(torch.autograd.Function):
-        @staticmethod
-        def forward(ctx, w,q,k,v,z,b):
-            B,T,H,C = w.shape 
-            assert T%CHUNK_LEN == 0
-            assert all(i.dtype==torch.bfloat16 for i in [w,q,k,v,z,b])
-            assert all(i.is_contiguous() for i in [w,q,k,v,z,b])
-            y = torch.empty_like(v)
-            s = torch.empty(B,H,T//CHUNK_LEN,C,C, dtype=torch.float32,device=w.device)
-            sa = torch.empty(B,T,H,C, dtype=torch.float32,device=w.device)
-            torch.ops.wind_backstepping.forward(w,q,k,v,z,b, y,s,sa)
-            ctx.save_for_backward(w,q,k,v,z,b,s,sa)
-            return y
-        @staticmethod
-        def backward(ctx, dy):
-            assert all(i.dtype==torch.bfloat16 for i in [dy])
-            assert all(i.is_contiguous() for i in [dy])
-            w,q,k,v,z,b,s,sa = ctx.saved_tensors
-            dw,dq,dk,dv,dz,db = [torch.empty_like(x) for x in [w,q,k,v,z,b]]
-            torch.ops.wind_backstepping.backward(w,q,k,v,z,b, dy,s,sa, dw,dq,dk,dv,dz,db)
-            return dw,dq,dk,dv,dz,db
+    if _X070_USE_TORCH_FALLBACK:
+        if os.environ.get("RWKV_JIT_ON") == "1":
+            print("RWKV x070 fallback disables torch.jit script mode for compatibility.")
+            MyModule = nn.Module
+            MyFunction = __nop
 
-    def RUN_CUDA_RWKV7g(q,w,k,v,a,b):
-        B,T,HC = q.shape
-        q,w,k,v,a,b = [i.view(B,T,HC//64,64) for i in [q,w,k,v,a,b]]
-        return WindBackstepping.apply(w,q,k,v,a,b).view(B,T,HC)
+        def RUN_CUDA_RWKV7g(q, w, k, v, a, b):
+            return _run_torch_rwkv7g(q, w, k, v, a, b)
+    else:
+        class WindBackstepping(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, w,q,k,v,z,b):
+                B,T,H,C = w.shape 
+                assert T%CHUNK_LEN == 0
+                assert all(i.dtype==torch.bfloat16 for i in [w,q,k,v,z,b])
+                assert all(i.is_contiguous() for i in [w,q,k,v,z,b])
+                y = torch.empty_like(v)
+                s = torch.empty(B,H,T//CHUNK_LEN,C,C, dtype=torch.float32,device=w.device)
+                sa = torch.empty(B,T,H,C, dtype=torch.float32,device=w.device)
+                torch.ops.wind_backstepping.forward(w,q,k,v,z,b, y,s,sa)
+                ctx.save_for_backward(w,q,k,v,z,b,s,sa)
+                return y
+            @staticmethod
+            def backward(ctx, dy):
+                assert all(i.dtype==torch.bfloat16 for i in [dy])
+                assert all(i.is_contiguous() for i in [dy])
+                w,q,k,v,z,b,s,sa = ctx.saved_tensors
+                dw,dq,dk,dv,dz,db = [torch.empty_like(x) for x in [w,q,k,v,z,b]]
+                torch.ops.wind_backstepping.backward(w,q,k,v,z,b, dy,s,sa, dw,dq,dk,dv,dz,db)
+                return dw,dq,dk,dv,dz,db
+
+        def RUN_CUDA_RWKV7g(q,w,k,v,a,b):
+            B,T,HC = q.shape
+            q,w,k,v,a,b = [i.view(B,T,HC//64,64) for i in [q,w,k,v,a,b]]
+            return WindBackstepping.apply(w,q,k,v,a,b).view(B,T,HC)
 
 elif 'x060' in os.environ["RWKV_MY_TESTING"]:
     if os.environ["RWKV_TRAIN_TYPE"] == 'states':
