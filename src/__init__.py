@@ -8,7 +8,13 @@ Supports:
 - Resume from external RWKV-LM checkpoints
 """
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("rwkv-trainer")
+except PackageNotFoundError:
+    # Local source checkout (not installed as a package).
+    __version__ = "0.0.0"
 
 from .trainer.pipeline import RWKVTrainingPipeline, ModelConfig, TrainingConfig, DataConfig
 from .trainer.model_utils import (

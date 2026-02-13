@@ -51,7 +51,7 @@ class TrainingConfig:
     grad_cp: int = 1  # gradient checkpointing
     epoch_save: int = 1
     precision: str = "bf16"  # bf16, fp16, fp32
-    strategy: str = "deepspeed_stage_1"
+    strategy: str = "auto"
 
 
 @dataclass
@@ -150,6 +150,32 @@ class RWKVTrainingPipeline:
         }
         with open(self.config_dir / "config.json", 'w') as f:
             json.dump(config, f, indent=2)
+
+    @staticmethod
+    def _is_valid_magic_prime(value: int) -> bool:
+        if value < 2 or value % 3 != 2:
+            return False
+        i = 2
+        while i * i <= value:
+            if value % i == 0:
+                return False
+            i += 1
+        return True
+
+    def _normalize_data_stats(self) -> None:
+        """
+        Normalize derived dataset stats used by the train script.
+        Keep behavior robust for small datasets and non-standard ctx_len.
+        """
+        if self.my_exit_tokens is None or self.my_exit_tokens <= 0:
+            raise RuntimeError("Prepared dataset is empty. Please provide non-empty training data.")
+
+        if self.magic_prime is None or not self._is_valid_magic_prime(int(self.magic_prime)):
+            # Small datasets can fail prime search; 2 is the smallest valid 3n+2 prime.
+            self.magic_prime = 2
+            print("### Warning: using fallback magic_prime=2 (dataset is very small).")
+        else:
+            self.magic_prime = int(self.magic_prime)
     
     def prepare_data(self, 
                      data: np.ndarray,
@@ -185,6 +211,7 @@ class RWKVTrainingPipeline:
         self.data_prefix = result['binidx_prefix']
         self.magic_prime = result['magic_prime']
         self.my_exit_tokens = result['total_tokens']
+        self._normalize_data_stats()
         self.data_prepared = True
         
         print(f"### Data preparation complete:")
@@ -337,7 +364,8 @@ class RWKVTrainingPipeline:
                 jsonl_path=jsonl_path,
                 output_dir=self.data_dir,
                 name=data_name,
-                n_epochs=n_epochs
+                n_epochs=n_epochs,
+                sequence_length=self.model_config.ctx_len
             )
         except ValueError as e:
             if "Cannot encode" in str(e):
@@ -360,6 +388,7 @@ class RWKVTrainingPipeline:
         self.data_prefix = result['binidx_prefix']
         self.magic_prime = result['magic_prime']
         self.my_exit_tokens = result['total_tokens']
+        self._normalize_data_stats()
         self.data_prepared = True
         
         print(f"### Data preparation complete:")
@@ -634,8 +663,20 @@ class RWKVTrainingPipeline:
         
         script_path = self._get_train_script_path()
         
+        use_cuda = self._is_cuda_available()
+        precision = t.precision
+        if (not use_cuda) and precision in ("bf16", "fp16"):
+            print(f"### Precision {precision} is not robust on CPU, falling back to fp32.")
+            precision = "fp32"
+
+        if stage in (1, 3) and self.my_exit_tokens <= m.ctx_len:
+            raise RuntimeError(
+                f"Dataset too small for ctx_len={m.ctx_len}: total_tokens={self.my_exit_tokens}. "
+                "Need more tokens or a smaller ctx_len."
+            )
+
         cmd = [
-            "python", str(script_path),
+            sys.executable, str(script_path),
             "--wandb", self.wandb_project or "",
             "--proj_dir", str(self.output_dir),
             "--data_file", str(self.data_prefix),
@@ -658,7 +699,7 @@ class RWKVTrainingPipeline:
             "--adam_eps", str(t.adam_eps),
             "--weight_decay", str(t.weight_decay if stage == 3 else 0),
             "--grad_cp", str(t.grad_cp),
-            "--precision", t.precision,
+            "--precision", precision,
             "--strategy", t.strategy,
             "--random_seed", str(random_seed),
         ]
@@ -674,15 +715,24 @@ class RWKVTrainingPipeline:
             ])
         else:
             # Stage 3: training on GPU
+            accelerator = "gpu" if use_cuda else "cpu"
             cmd.extend([
                 "--load_model", "0" if not continue_training else "",
                 "--my_exit_tokens", str(self.my_exit_tokens),
                 "--magic_prime", str(self.magic_prime),
-                "--accelerator", "gpu",
+                "--accelerator", accelerator,
                 "--devices", "1",
             ])
         
         return cmd
+
+    @staticmethod
+    def _is_cuda_available() -> bool:
+        try:
+            import torch
+            return torch.cuda.is_available()
+        except Exception:
+            return False
     
     def _run_command(self, cmd: list, description: str = ""):
         """Run command with error handling"""

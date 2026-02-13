@@ -8,6 +8,7 @@ with the rwkv_trainer package structure.
 
 import sys
 import os
+import subprocess
 from pathlib import Path
 
 # Add src to path
@@ -16,6 +17,16 @@ sys.path.insert(0, str(script_dir / "src"))
 
 import logging
 logging.basicConfig(level=logging.INFO)
+
+
+def main() -> int:
+    """
+    Console-script entrypoint for `rwkv-train`.
+    Execute this module as a script so existing `__main__` flow is preserved.
+    """
+    cmd = [sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]]
+    return subprocess.call(cmd)
+
 
 if __name__ == "__main__":
     from argparse import ArgumentParser
@@ -107,8 +118,13 @@ if __name__ == "__main__":
     import torch
     from torch.utils.data import DataLoader
     
+    deepspeed = None
     if "deepspeed" in args.strategy:
-        import deepspeed
+        try:
+            import deepspeed
+        except ImportError:
+            rank_zero_info("DeepSpeed is not installed, falling back strategy to 'auto'.")
+            args.strategy = "auto"
 
     if args.random_seed >= 0:
         print(f"########## WARNING: GLOBAL SEED {args.random_seed} ##########\n" * 3)

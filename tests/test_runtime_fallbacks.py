@@ -1,7 +1,13 @@
 import os
+import json
 import subprocess
 import sys
+import tempfile
+import pickle
+import gc
 from pathlib import Path
+
+import numpy as np
 
 
 ROOT = Path(__file__).parent.parent
@@ -94,3 +100,60 @@ loss.backward()
 """
     result = subprocess.run([sys.executable, "-c", script], cwd=ROOT, capture_output=True, text=True)
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+
+
+def test_process_jsonl_magic_prime_uses_sequence_length():
+    """JSONL path should compute magic_prime with the actual ctx length, not hardcoded 1024."""
+    sys.path.insert(0, str(ROOT / "src"))
+    from data_utils.converter import DataPipeline, JsonlToBinIdxConverter
+
+    with tempfile.TemporaryDirectory() as td:
+        td_path = Path(td)
+        jsonl_path = td_path / "data.jsonl"
+        with open(jsonl_path, "w", encoding="utf-8") as f:
+            for _ in range(200):
+                arr = np.random.randint(0, 100, size=16)
+                f.write(json.dumps({"text": " ".join(map(str, arr.tolist()))}) + "\n")
+
+        pipeline = DataPipeline()
+        result = pipeline.process_jsonl(
+            jsonl_path=jsonl_path,
+            output_dir=td_path,
+            name="train",
+            n_epochs=1,
+            sequence_length=16,
+        )
+
+        converter = JsonlToBinIdxConverter(pipeline.tokenizer)
+        expected = converter.compute_magic_prime(result["binidx_prefix"], 16)
+        assert result["magic_prime"] == expected
+
+
+def test_mmapindexed_dataset_pickle_roundtrip_on_windows_spawn_path():
+    """MMapIndexedDataset should be pickle-restorable (used by DataLoader workers on Windows)."""
+    sys.path.insert(0, str(ROOT / "src"))
+    from data_utils.converter import DataPipeline
+    from data_utils.binidx import MMapIndexedDataset
+
+    with tempfile.TemporaryDirectory() as td:
+        td_path = Path(td)
+        data = np.random.randint(0, 50, size=(8, 16), dtype=np.int64)
+        result = DataPipeline().process_numpy(
+            data=data,
+            output_dir=td_path,
+            name="train",
+            sequence_length=16,
+            n_epochs=1,
+        )
+        ds = MMapIndexedDataset(str(result["binidx_prefix"]))
+        blob = pickle.dumps(ds)
+        restored = pickle.loads(blob)
+        assert len(restored) == len(ds)
+        sample = restored[0]
+        assert sample is not None
+        restored.close()
+        ds.close()
+        del sample
+        del restored
+        del ds
+        gc.collect()

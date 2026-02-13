@@ -339,7 +339,8 @@ class DataPipeline:
                      jsonl_path: Union[str, Path],
                      output_dir: Union[str, Path],
                      name: str = "data",
-                     n_epochs: int = 3) -> dict:
+                     n_epochs: int = 3,
+                     sequence_length: int = 1024) -> dict:
         """
         Process existing JSONL file through bin/idx conversion
         
@@ -348,6 +349,7 @@ class DataPipeline:
             output_dir: output directory
             name: base name for output files
             n_epochs: number of epochs for data duplication
+            sequence_length: context length used to compute magic_prime
             
         Returns:
             Dictionary with paths and information
@@ -364,9 +366,9 @@ class DataPipeline:
         binidx_prefix = output_dir / name
         self.jsonl_converter.convert(jsonl_dest, binidx_prefix, n_epochs)
         
-        # Get info (use ctx_len=1024 as default)
+        # Get info
         info = self.jsonl_converter.get_data_info(binidx_prefix)
-        magic_prime = self.jsonl_converter.compute_magic_prime(binidx_prefix, 1024)
+        magic_prime = self.jsonl_converter.compute_magic_prime(binidx_prefix, sequence_length)
         
         # Save vocab
         vocab_path = output_dir / "vocab.txt"

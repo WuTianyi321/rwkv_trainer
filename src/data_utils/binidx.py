@@ -151,8 +151,16 @@ class MMapIndexedDataset(torch.utils.data.Dataset):
             )
 
         def __del__(self):
-            self._bin_buffer_mmap._mmap.close()
-            del self._bin_buffer_mmap
+            self.close()
+
+        def close(self):
+            mmap_obj = getattr(self, "_bin_buffer_mmap", None)
+            if mmap_obj is not None:
+                try:
+                    mmap_obj._mmap.close()
+                except Exception:
+                    pass
+                del self._bin_buffer_mmap
 
         @property
         def dtype(self):
@@ -186,7 +194,8 @@ class MMapIndexedDataset(torch.utils.data.Dataset):
         return self._path
 
     def __setstate__(self, state):
-        self._do_init(state)
+        # Worker-process restore path (e.g. Windows spawn).
+        self._do_init(state, skip_warmup=True)
 
     def _do_init(self, path, skip_warmup):
         self._path = path
@@ -203,9 +212,21 @@ class MMapIndexedDataset(torch.utils.data.Dataset):
         self._bin_buffer = memoryview(self._bin_buffer_mmap)
 
     def __del__(self):
-        self._bin_buffer_mmap._mmap.close()
-        del self._bin_buffer_mmap
-        del self._index
+        self.close()
+
+    def close(self):
+        mmap_obj = getattr(self, "_bin_buffer_mmap", None)
+        if mmap_obj is not None:
+            try:
+                mmap_obj._mmap.close()
+            except Exception:
+                pass
+            del self._bin_buffer_mmap
+        index_obj = getattr(self, "_index", None)
+        if index_obj is not None:
+            if hasattr(index_obj, "close"):
+                index_obj.close()
+            del self._index
 
     def __len__(self):
         return len(self._index)

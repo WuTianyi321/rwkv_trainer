@@ -178,6 +178,37 @@ def test_pipeline_get_data_info(tmp_path):
     assert pipeline.magic_prime is not None
 
 
+def test_pipeline_uses_current_python_for_subprocess(tmp_path):
+    """Pipeline should launch training subprocess with current interpreter."""
+    pipeline = RWKVTrainingPipeline(work_dir=tmp_path / "test_work")
+    pipeline.data_prefix = "dummy"
+    pipeline.magic_prime = 2
+    pipeline.my_exit_tokens = 2048
+    cmd = pipeline._build_train_command(stage=1, random_seed=-1)
+    assert cmd[0] == sys.executable
+
+
+def test_pipeline_magic_prime_fallback_for_small_data(tmp_path):
+    """Small-data path should get a safe fallback magic_prime."""
+    pipeline = RWKVTrainingPipeline(work_dir=tmp_path / "test_work")
+    pipeline.model_config.ctx_len = 1024
+    pipeline.my_exit_tokens = 1025
+    pipeline.magic_prime = None
+    pipeline._normalize_data_stats()
+    assert pipeline.magic_prime == 2
+
+
+def test_pipeline_rejects_too_small_dataset(tmp_path):
+    """Dataset with <= ctx_len tokens cannot create training pairs."""
+    pipeline = RWKVTrainingPipeline(work_dir=tmp_path / "test_work")
+    pipeline.model_config.ctx_len = 1024
+    pipeline.my_exit_tokens = 1024
+    pipeline.data_prefix = "dummy"
+    pipeline.magic_prime = 2
+    with pytest.raises(RuntimeError, match="Dataset too small"):
+        pipeline._build_train_command(stage=1, random_seed=-1)
+
+
 @pytest.mark.skip(reason="Requires actual model training, too slow for unit tests")
 def test_pipeline_initialize_model():
     """Test model initialization (requires PyTorch)"""

@@ -53,7 +53,14 @@ class MyDataset(Dataset):
                 if args.my_pile_stage != 4:
                     assert MaybeIsPrime(args.magic_prime)
                     assert args.magic_prime % 3 == 2
-                    assert args.magic_prime / dataset_slot > 0.9 and args.magic_prime / dataset_slot <= 1
+                    assert dataset_slot > 0
+                    ratio = args.magic_prime / dataset_slot
+                    assert ratio <= 1
+                    if ratio <= 0.9:
+                        rank_zero_info(
+                            f"Warning: small dataset prime ratio {ratio:.3f} (magic_prime={args.magic_prime}, "
+                            f"dataset_slot={dataset_slot}). Sampling uniformity may be reduced."
+                        )
         elif args.data_type == "numpy":
             self.data = np.load(args.data_file).astype("int")
             self.vocab_size = args.vocab_size

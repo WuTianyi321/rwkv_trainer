@@ -17,11 +17,14 @@ A packaged, general-purpose RWKV training framework for sequence data.
 ### From PyPI (Recommended)
 
 ```bash
-# Basic installation
+# Install package
 pip install rwkv-trainer
 
-# With CUDA support (includes PyTorch)
-pip install rwkv-trainer[cuda]
+# Install PyTorch (choose ONE that matches your machine)
+# CPU-only:
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+# Or CUDA 12.4:
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
 
 [![PyPI version](https://badge.fury.io/py/rwkv-trainer.svg)](https://pypi.org/project/rwkv-trainer/)
@@ -36,12 +39,12 @@ git clone https://github.com/WuTianyi321/rwkv_trainer.git
 cd rwkv_trainer
 
 # Using pip
-pip install -e ".[dev]"
+pip install ".[dev]"
 
 # Or using uv (faster)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv venv
-uv pip install -e ".[dev]"
+uv pip install ".[dev]"
 ```
 
 ## Quick Start
@@ -65,6 +68,13 @@ pipeline = RWKVTrainingPipeline(
     tokenizer=tokenizer
 )
 pipeline.train(data, num_epochs=100)
+```
+
+If you are on Windows (or any environment where CUDA extensions cannot compile), force pure PyTorch fallback for RWKV-7:
+
+```python
+import os
+os.environ["RWKV_TORCH_FALLBACK"] = "1"
 ```
 
 ### Example 2: From JSONL File
@@ -224,7 +234,7 @@ Here is the complete pipeline from input data to trained model:
 │                              TRAINING                                        │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  Stage 3: Train (GPU)                                                        │
+│  Stage 3: Train (Auto CPU/GPU)                                               │
 │  ┌────────────────────────────────────────────────────────────────────────┐ │
 │  │ python train.py --my_pile_stage 3 ...                                  │ │
 │  │                                                                        │ │
@@ -234,7 +244,7 @@ Here is the complete pipeline from input data to trained model:
 │  │ - Batch size: micro_bsz (default: 16)                                 │ │
 │  │                                                                        │ │
 │  │ Training Loop:                                                         │ │
-│  │ - Optimizer: Adam with DeepSpeed ZeRO-1/2                             │ │
+│  │ - Optimizer: Adam/AdamW (DeepSpeed optional)                           │ │
 │  │ - Learning rate: lr_init → lr_final (cosine schedule)                 │ │
 │  │ - Gradient checkpointing: Save VRAM, slower speed                     │ │
 │  │                                                                        │ │
@@ -363,6 +373,7 @@ tokens = tokenizer.encode_angle_sequence([0, 45, 90])  # [1, 46, 91]
 | `micro_bsz` | 16 | Batch size per GPU |
 | `grad_cp` | 1 | Gradient checkpointing |
 | `precision` | "bf16" | "bf16", "fp16", or "fp32" |
+| `strategy` | "auto" | Lightning strategy (DeepSpeed optional) |
 
 ---
 
@@ -403,6 +414,36 @@ pipeline.prepare_data_from_jsonl("text_data.jsonl")
 ```python
 # If checkpoint has vocab_size=65536
 tokenizer = IntegerTokenizer(max_value=65535)  # 65535 + 1 for end_of_doc = 65536
+```
+
+### `rwkv-train` command not found / fails
+
+Install the package (not just source files) and run:
+
+```bash
+pip install rwkv-trainer
+rwkv-train --help
+```
+
+If you need DeepSpeed explicitly:
+
+```bash
+pip install "rwkv-trainer[deepspeed]"
+```
+
+### Windows: CUDA extension build fails
+
+Use PyTorch fallback for x070:
+
+```bash
+set RWKV_TORCH_FALLBACK=1
+```
+
+or in Python:
+
+```python
+import os
+os.environ["RWKV_TORCH_FALLBACK"] = "1"
 ```
 
 ---
