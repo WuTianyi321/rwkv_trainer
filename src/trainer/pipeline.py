@@ -222,7 +222,14 @@ class RWKVTrainingPipeline:
         """
         try:
             with open(jsonl_path, 'r', encoding='utf-8') as f:
-                lines = [f.readline().strip() for _ in range(5) if f.readline()]
+                # Read at most first 5 non-empty lines without advancing twice per iteration.
+                lines = []
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        lines.append(line)
+                    if len(lines) >= 5:
+                        break
             
             if not lines:
                 return 'unknown'

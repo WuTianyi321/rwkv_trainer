@@ -112,6 +112,30 @@ def test_pipeline_prepare_data_from_file(tmp_path):
     assert result['num_sequences'] == 30
 
 
+def test_detect_jsonl_format_text(tmp_path):
+    """Text JSONL should be detected as text (no skipped first line)."""
+    work_dir = tmp_path / "test_work"
+    jsonl_path = tmp_path / "text_data.jsonl"
+    with open(jsonl_path, "w", encoding="utf-8") as f:
+        f.write(json.dumps({"text": "hello world"}) + "\n")
+        f.write(json.dumps({"text": "1 2 3"}) + "\n")
+
+    pipeline = RWKVTrainingPipeline(work_dir=work_dir)
+    assert pipeline._detect_jsonl_format(jsonl_path) == "text"
+
+
+def test_detect_jsonl_format_integer(tmp_path):
+    """Integer JSONL should still be detected as integer."""
+    work_dir = tmp_path / "test_work"
+    jsonl_path = tmp_path / "int_data.jsonl"
+    with open(jsonl_path, "w", encoding="utf-8") as f:
+        f.write(json.dumps({"text": "1 2 3 4"}) + "\n")
+        f.write(json.dumps({"text": "5 6 7 8"}) + "\n")
+
+    pipeline = RWKVTrainingPipeline(work_dir=work_dir)
+    assert pipeline._detect_jsonl_format(jsonl_path) == "integer"
+
+
 def test_pipeline_save_config(tmp_path):
     """Test that pipeline saves configuration"""
     work_dir = tmp_path / "test_work"
